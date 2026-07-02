@@ -17,7 +17,8 @@ supabase = init_connection()
 
 @st.cache_data(ttl=600)
 def get_data():
-    response = supabase.table("cold_chain_tracking").select("*").execute()
+    # FIX: Added .range(0, 4999) to override the default 1,000-row limit
+    response = supabase.table("cold_chain_tracking").select("*").range(0, 4999).execute()
     return pd.DataFrame(response.data)
 
 # Helper: Feature Engineering for Predictive Analytics
