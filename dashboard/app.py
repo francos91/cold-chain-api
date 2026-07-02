@@ -105,31 +105,43 @@ with tab2:
     )
 
 # =============================================
-# UPDATED TAB 3: WITH TOP 5 LEADERBOARD
+# UPDATED TAB 3: WITH RISK THRESHOLD SLIDER
 # =============================================
 with tab3:
     st.subheader("Predictive Risk Intelligence")
     
-    # --- NEW: Make predictions using the Advanced Model ---
-    # Prepare features in the exact order: ['route_enc', 'route_risk_score', 'is_delayed']
+    # --- 🎯 Risk Threshold Slider (Decision-Support Tool) ---
+    threshold = st.slider(
+        "🎯 Risk Threshold (%)",
+        min_value=10,
+        max_value=90,
+        value=50,
+        step=5,
+        help="Lower threshold = catches more breaches (higher recall), but may increase false alarms (lower precision)."
+    ) / 100.0  # Convert to decimal (e.g., 50 -> 0.50)
+    
+    st.caption(f"⚙️ Currently using a **{threshold*100:.0f}%** threshold. Shipments with a probability above this are flagged as high-risk.")
+    
+    # --- Prepare features for the model ---
     X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
     
-    # Run the model predictions
-    filtered_df_ready['predicted_risk'] = model.predict(X_pred)
+    # --- Get probabilities (not just binary predictions) ---
     filtered_df_ready['risk_probability'] = model.predict_proba(X_pred)[:, 1]
     
-    # Display new AI-powered metrics
+    # --- Apply the dynamic threshold to get binary predictions ---
+    filtered_df_ready['predicted_risk'] = (filtered_df_ready['risk_probability'] >= threshold).astype(int)
+    
+    # --- Display AI-powered metrics ---
     col1, col2 = st.columns(2)
     col1.metric("🚨 Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
     col2.metric("🎯 Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
     
     st.divider()
 
-    # --- 🔥 NEW: Top 5 Highest Risk Shipments (Leaderboard) ---
+    # --- 🚨 Top 5 Highest Risk Shipments (Leaderboard) ---
     st.markdown("### 🚨 Top 5 Highest Risk Shipments")
     
     # Filter to show only predicted high-risk shipments that are NOT already delivered
-    # (Because you can only act on shipments that are still in transit, delayed, or at warehouse)
     high_risk_df = filtered_df_ready[
         (filtered_df_ready['predicted_risk'] == 1) & 
         (filtered_df_ready['status'] != 'delivered')
@@ -139,10 +151,7 @@ with tab3:
     top_5_df = high_risk_df.sort_values('risk_probability', ascending=False).head(5)
     
     if len(top_5_df) > 0:
-        # Select only the most relevant columns for the logistics manager
         display_cols = ['shipment_id', 'origin', 'destination', 'temperature_celsius', 'status', 'risk_probability']
-        
-        # Display as a clean, visual leaderboard
         st.dataframe(
             top_5_df[display_cols],
             use_container_width=True,
@@ -164,15 +173,14 @@ with tab3:
             delta=f"{highest_risk['origin']} → {highest_risk['destination']}"
         )
     else:
-        st.success("🎉 No active high-risk shipments predicted! All at-risk shipments have been delivered.")
+        st.success(f"🎉 No active high-risk shipments predicted at the **{threshold*100:.0f}%** threshold!")
 
     st.divider()
 
-    # --- Existing: Full High-Risk Shipments List (Now only shows active shipments) ---
+    # --- 📋 Full High-Risk Shipments List ---
     st.markdown("### 📋 Full High-Risk Shipments List")
     
     if len(high_risk_df) > 0:
-        # Select only the most relevant columns for the logistics manager
         display_cols = ['shipment_id', 'origin', 'destination', 'temperature_celsius', 'status', 'risk_probability']
         st.dataframe(
             high_risk_df[display_cols],
@@ -186,11 +194,11 @@ with tab3:
                 "risk_probability": st.column_config.NumberColumn("Risk Probability", format="%.1f%%")
             }
         )
-        st.caption(f"Showing {len(high_risk_df)} active high-risk shipments from the current filter.")
+        st.caption(f"Showing {len(high_risk_df)} active high-risk shipments at the **{threshold*100:.0f}%** threshold.")
     else:
-        st.success("🎉 No active high-risk shipments predicted for the current filter!")
+        st.success(f"🎉 No active high-risk shipments at the **{threshold*100:.0f}%** threshold!")
 
-    # --- Your existing High-Risk Routes Chart (still here!) ---
+    # --- High-Risk Routes Chart ---
     st.markdown("### High-Risk Routes Analysis")
     route_risk = filtered_df_ready.groupby('route')['is_risk'].mean().reset_index()
     fig_risk = px.bar(route_risk.sort_values('is_risk', ascending=False).head(10), 
