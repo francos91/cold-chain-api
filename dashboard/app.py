@@ -7,7 +7,7 @@ from pathlib import Path
 
 # 1. Page Configuration
 st.set_page_config(page_title="Logistics Dashboard", layout="wide")
-st.title("Cold Chain Logistics Pipeline Dashboard")
+st.title("Cold Chain Logistics Dashboard")
 
 # 2. Connection
 @st.cache_resource
