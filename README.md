@@ -31,6 +31,7 @@ cold-chain-logistics/
 ```   
 ## Key Features
 - **Predictive Risk Intelligence**: Employs a Random Forest classifier (trained on historical route data) to predict temperature excursion risks in real-time. The model identifies high-risk corridors and provides per-shipment risk probabilities, enabling proactive intervention before breaches occur.
+- **Dynamic Risk Threshold Slider**: An interactive decision-support tool that allows logistics managers to adjust the classification threshold (10% – 90%) based on their operational risk tolerance. Lower thresholds catch more potential breaches (higher recall) while higher thresholds reduce false alarms (higher precision).
 - **Top 5 High-Risk Shipments Leaderboard**: Displays the five highest-risk active shipments sorted by probability score, allowing logistics managers to prioritize immediate action on the most critical cargo.
 - **Actionable Risk Filtering**: The high-risk shipments list automatically excludes already-delivered shipments, focusing only on active shipments where intervention is still possible.
 - **Live Machine Learning Integration**: The trained model and encoder are serialized using `joblib` and deployed directly within the Streamlit dashboard, delivering on-demand risk predictions for filtered datasets.
@@ -53,6 +54,32 @@ The predictive risk model was developed and validated in Google Colab using the 
 | Recall (Risk Class) | 0.47 |
 | F1-Score (Risk Class) | 0.45 |
 
+## Synthetic Data Generator
+The synthetic dataset was generated using statistical parameters extracted from academic literature on South African cold chain logistics. Key parameters include:
+
+| Parameter | Literature Value | Implementation |
+| :--- | :--- | :--- |
+| Mean Temperature | 0.5°C – 4.5°C | Base mean of 0.5°C (grape export studies) |
+| Standard Deviation | 0.6°C – 1.5°C | Base std of 0.6°C |
+| Excursion Rate | 15% – 25% | 20% blended rate (TC vs NTC airlock studies) |
+| Delay Temperature Rise | +2°C to +5°C | Applied to delayed shipments |
+| Door Opening Rise | +3°C to +8°C | Applied to in-transit shipments |
+| Altitude Penalty | ~21% cooling loss | Applied to Johannesburg/Highveld routes |
+| Summer Heat Load | +2°C to +5°C | Applied probabilistically to 40% of shipments |
+
+**South Africa-Specific Literature Sources:**
+- Grape export reefer studies (Cape Town → Rotterdam)
+- Western Cape orange cold store airlock research
+- Gauteng last-mile delivery temperature studies
+- Refrigeration performance at Johannesburg altitude (1,750m)
+
+## Decision-Support Tools
+The dashboard includes an interactive **Risk Threshold Slider** that allows users to:
+- **Adjust risk sensitivity**: Slide between 10% and 90% to control how many shipments are flagged as high-risk.
+- **Balance precision vs. recall**: Lower thresholds catch more actual breaches but may increase false alarms.
+- **Align with business needs**: Match the model's behavior to operational risk tolerance and financial constraints.
+- **See immediate feedback**: The "Predicted High-Risk Shipments" count and the high-risk lists update instantly as the slider is moved.
+
 ## Future Roadmap
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
@@ -61,8 +88,9 @@ The predictive risk model was developed and validated in Google Colab using the 
 - [ ] Extend the Random Forest model with XGBoost or LightGBM to improve prediction accuracy.
 - [ ] Add a "What-If" simulation tool to evaluate the impact of route changes on risk scores.
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
+- [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
 
 ## Notes
 - This project uses synthetic data to simulate real-world cold chain conditions. The system is designed to accept live IoT sensor data with zero code changes.
 - The dashboard includes pagination to handle large datasets efficiently, ensuring scalability as the database grows.
-
+- The synthetic data generator is grounded in South African cold chain literature, making it suitable for academic research and industrial engineering applications.
