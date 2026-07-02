@@ -17,8 +17,8 @@ supabase = init_connection()
 
 @st.cache_data(ttl=600)
 def get_data():
-    # FIX: Explicitly range to 4999 to pull your full 2,000+ dataset
-    response = supabase.table("cold_chain_tracking").select("*").range(0, 4999).execute()
+    # .limit(5000) ensures we pull the full dataset without default caps
+    response = supabase.table("cold_chain_tracking").select("*").limit(5000).execute()
     return pd.DataFrame(response.data)
 
 # Helper: Feature Engineering for Predictive Analytics
@@ -43,6 +43,10 @@ if st.sidebar.button("🔄 Refresh Data"):
     st.rerun()
 
 df = get_data()
+
+# Debugging: Verify record count
+st.sidebar.write(f"Rows fetched from API: {len(df)}")
+
 df_ready = engineer_features_for_app(df)
 
 selected_status = st.sidebar.multiselect("Select Status", options=df['status'].unique(), default=df['status'].unique())
