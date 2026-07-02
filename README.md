@@ -19,3 +19,4 @@ This pipeline was developed to address the challenge of real-time logistics moni
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
+- [ ] Integrate Carbon emissions per trip/route and possible Carbon tax cost.
