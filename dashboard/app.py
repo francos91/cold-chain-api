@@ -104,6 +104,9 @@ with tab2:
         }
     )
 
+# =============================================
+# UPDATED TAB 3: WITH TOP 5 LEADERBOARD
+# =============================================
 with tab3:
     st.subheader("Predictive Risk Intelligence")
     
@@ -120,13 +123,53 @@ with tab3:
     col1.metric("🚨 Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
     col2.metric("🎯 Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
     
-    st.divider()  # A nice line separator
+    st.divider()
 
-    # --- 🔥 NEW BLOCK: Show the actual high-risk shipments ---
-    st.markdown("### 📋 High-Risk Shipments List")
+    # --- 🔥 NEW: Top 5 Highest Risk Shipments (Leaderboard) ---
+    st.markdown("### 🚨 Top 5 Highest Risk Shipments")
     
-    # Filter the dataframe to show only predicted high-risk shipments
-    high_risk_df = filtered_df_ready[filtered_df_ready['predicted_risk'] == 1]
+    # Filter to show only predicted high-risk shipments that are NOT already delivered
+    # (Because you can only act on shipments that are still in transit, delayed, or at warehouse)
+    high_risk_df = filtered_df_ready[
+        (filtered_df_ready['predicted_risk'] == 1) & 
+        (filtered_df_ready['status'] != 'delivered')
+    ]
+    
+    # Sort by risk probability (highest first) and take top 5
+    top_5_df = high_risk_df.sort_values('risk_probability', ascending=False).head(5)
+    
+    if len(top_5_df) > 0:
+        # Select only the most relevant columns for the logistics manager
+        display_cols = ['shipment_id', 'origin', 'destination', 'temperature_celsius', 'status', 'risk_probability']
+        
+        # Display as a clean, visual leaderboard
+        st.dataframe(
+            top_5_df[display_cols],
+            use_container_width=True,
+            column_config={
+                "shipment_id": "Shipment ID",
+                "origin": "Origin",
+                "destination": "Destination",
+                "temperature_celsius": st.column_config.NumberColumn("Temperature (°C)", format="%.2f"),
+                "status": "Status",
+                "risk_probability": st.column_config.NumberColumn("Risk Probability", format="%.1f%%")
+            }
+        )
+        
+        # Show the highest risk probability as a bold metric
+        highest_risk = top_5_df.iloc[0]
+        st.metric(
+            f"⚠️ Highest Risk: {highest_risk['shipment_id']}", 
+            f"{highest_risk['risk_probability']:.1%}",
+            delta=f"{highest_risk['origin']} → {highest_risk['destination']}"
+        )
+    else:
+        st.success("🎉 No active high-risk shipments predicted! All at-risk shipments have been delivered.")
+
+    st.divider()
+
+    # --- Existing: Full High-Risk Shipments List (Now only shows active shipments) ---
+    st.markdown("### 📋 Full High-Risk Shipments List")
     
     if len(high_risk_df) > 0:
         # Select only the most relevant columns for the logistics manager
@@ -143,9 +186,9 @@ with tab3:
                 "risk_probability": st.column_config.NumberColumn("Risk Probability", format="%.1f%%")
             }
         )
-        st.caption(f"Showing {len(high_risk_df)} high-risk shipments from the current filter.")
+        st.caption(f"Showing {len(high_risk_df)} active high-risk shipments from the current filter.")
     else:
-        st.success("🎉 No high-risk shipments predicted for the current filter!")
+        st.success("🎉 No active high-risk shipments predicted for the current filter!")
 
     # --- Your existing High-Risk Routes Chart (still here!) ---
     st.markdown("### High-Risk Routes Analysis")
