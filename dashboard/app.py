@@ -16,11 +16,27 @@ def init_connection():
 
 supabase = init_connection()
 
+# 🔥 FIXED: Pagination to fetch ALL rows (no 5000 limit)
 @st.cache_data(ttl=600)
 def get_data():
-    # .limit(5000) ensures we pull the full dataset without default caps
-    response = supabase.table("cold_chain_tracking").select("*").limit(5000).execute()
-    return pd.DataFrame(response.data)
+    all_data = []
+    page_size = 1000
+    start = 0
+    
+    while True:
+        end = start + page_size - 1
+        response = supabase.table("cold_chain_tracking").select("*").range(start, end).execute()
+        
+        if not response.data:
+            break
+        
+        all_data.extend(response.data)
+        start += page_size
+        
+        if len(response.data) < page_size:
+            break
+    
+    return pd.DataFrame(all_data)
 
 # 3. Load the Advanced Model & Encoder
 @st.cache_resource
