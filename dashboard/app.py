@@ -1,36 +1,57 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from supabase import create_client
 
 # 1. Page Configuration
-st.set_page_config(page_title="Logistics Pipeline Dashboard", layout="wide")
+st.set_page_config(page_title="Logistics Dashboard", layout="wide")
 st.title("Cold Chain Logistics Pipeline Dashboard")
 
-# 2. Secure Supabase Connection
+# 2. Connection
 @st.cache_resource
 def init_connection():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 
-# 3. Data Fetching with Caching
 @st.cache_data(ttl=600)
 def get_data():
     response = supabase.table("cold_chain_tracking").select("*").execute()
     return pd.DataFrame(response.data)
 
-# 4. Dashboard UI
 df = get_data()
 
-# Summary Metrics
-col1, col2, col3 = st.columns(3)
-col1.metric("Total Shipments", len(df))
-col2.metric("Avg Temp (°C)", round(df['temperature_celsius'].mean(), 2))
-col3.metric("Delayed Shipments", len(df[df['status'] == 'delayed']))
+# 3. Sidebar Filtering
+st.sidebar.header("Filter Options")
+selected_status = st.sidebar.multiselect("Select Status", options=df['status'].unique(), default=df['status'].unique())
+filtered_df = df[df['status'].isin(selected_status)]
 
-# EDA: Visualization
-st.subheader("Temperature Distribution")
-st.bar_chart(df['temperature_celsius'].value_counts().sort_index())
+# 4. Tabs and Professional Layout
+tab1, tab2 = st.tabs(["📊 Overview", "📋 Raw Data"])
 
-st.subheader("Raw Logistics Data")
-st.dataframe(df)
+with tab1:
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Shipments", len(filtered_df))
+    
+    # Calculate Average and color-code logic
+    avg_temp = round(filtered_df['temperature_celsius'].mean(), 2)
+    col2.metric("Avg Temp (°C)", avg_temp)
+    
+    col3.metric("Delayed Shipments", len(filtered_df[filtered_df['status'] == 'delayed']))
+    
+    st.subheader("Temperature Distribution")
+    # Professional Plotly Histogram
+    fig = px.histogram(filtered_df, x="temperature_celsius", 
+                       nbins=20, 
+                       color_discrete_sequence=['#008080'])
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.subheader("Logistics Data Table")
+    # Highlight dangerous temperatures (> 8°C) in red
+    def color_risk(val):
+        color = 'red' if val > 8 else 'green'
+        return f'color: {color}'
+    
+    st.dataframe(filtered_df.style.applymap(color_risk, subset=['temperature_celsius']), 
+                 use_container_width=True)
