@@ -33,14 +33,12 @@ with tab1:
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Shipments", len(filtered_df))
     
-    # Calculate Average and color-code logic
     avg_temp = round(filtered_df['temperature_celsius'].mean(), 2)
     col2.metric("Avg Temp (°C)", avg_temp)
     
     col3.metric("Delayed Shipments", len(filtered_df[filtered_df['status'] == 'delayed']))
     
     st.subheader("Temperature Distribution")
-    # Professional Plotly Histogram
     fig = px.histogram(filtered_df, x="temperature_celsius", 
                        nbins=20, 
                        color_discrete_sequence=['#008080'])
@@ -48,10 +46,16 @@ with tab1:
 
 with tab2:
     st.subheader("Logistics Data Table")
-    # Highlight dangerous temperatures (> 8°C) in red
-    def color_risk(val):
-        color = 'red' if val > 8 else 'green'
-        return f'color: {color}'
     
-    st.dataframe(filtered_df.style.applymap(color_risk, subset=['temperature_celsius']), 
-                 use_container_width=True)
+    # FIX: Use column_config for conditional formatting in newer Streamlit versions
+    # This is more stable than .style.applymap for st.dataframe
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        column_config={
+            "temperature_celsius": st.column_config.NumberColumn(
+                "Temperature (°C)",
+                format="%.2f",
+            )
+        }
+    )
