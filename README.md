@@ -28,10 +28,11 @@ cold-chain-logistics/
 ├── requirements.txt         # Python dependencies
 └── README.md                # This file
 
-```    
+```   
 ## Key Features
 - **Predictive Risk Intelligence**: Employs a Random Forest classifier (trained on historical route data) to predict temperature excursion risks in real-time. The model identifies high-risk corridors and provides per-shipment risk probabilities, enabling proactive intervention before breaches occur.
-- The dashboard includes a sortable, drill-down list of all predicted high-risk shipments, allowing logistics managers to immediately identify and investigate specific at-risk cargo.
+- **Top 5 High-Risk Shipments Leaderboard**: Displays the five highest-risk active shipments sorted by probability score, allowing logistics managers to prioritize immediate action on the most critical cargo.
+- **Actionable Risk Filtering**: The high-risk shipments list automatically excludes already-delivered shipments, focusing only on active shipments where intervention is still possible.
 - **Live Machine Learning Integration**: The trained model and encoder are serialized using `joblib` and deployed directly within the Streamlit dashboard, delivering on-demand risk predictions for filtered datasets.
 - **Interactive Filtering & Analytics**: Real-time dashboard filtering by shipment status, with dynamic updates to both historical metrics and AI-powered risk predictions.
 - **Scalable Data Pipeline**: Secure data ingestion via a FastAPI backend (deployed on Render), with Supabase (PostgreSQL) as the cloud data store.
@@ -61,14 +62,7 @@ The predictive risk model was developed and validated in Google Colab using the 
 - [ ] Add a "What-If" simulation tool to evaluate the impact of route changes on risk scores.
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 
-
-
-
-
-
-
-
-
-
-
+## Notes
+- This project uses synthetic data to simulate real-world cold chain conditions. The system is designed to accept live IoT sensor data with zero code changes.
+- The dashboard includes pagination to handle large datasets efficiently, ensuring scalability as the database grows.
 
