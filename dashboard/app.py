@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from supabase import create_client
-from sklearn.preprocessing import LabelEncoder
+import joblib
+from pathlib import Path
 
 # 1. Page Configuration
 st.set_page_config(page_title="Logistics Dashboard", layout="wide")
@@ -21,7 +22,17 @@ def get_data():
     response = supabase.table("cold_chain_tracking").select("*").limit(5000).execute()
     return pd.DataFrame(response.data)
 
-# Helper: Feature Engineering for Predictive Analytics
+# 3. Load the Advanced Model & Encoder
+@st.cache_resource
+def load_advanced_model():
+    BASE_DIR = Path(__file__).parent
+    model = joblib.load(BASE_DIR / "advanced_model.pkl")
+    le_route = joblib.load(BASE_DIR / "le_route.pkl")
+    return model, le_route
+
+model, le_route = load_advanced_model()
+
+# 4. Helper: Feature Engineering for Predictive Analytics (UPDATED for Model)
 def engineer_features_for_app(df):
     df_feat = df.copy()
     df_feat['route'] = df_feat['origin'] + "_to_" + df_feat['destination']
@@ -30,11 +41,23 @@ def engineer_features_for_app(df):
     risk_map = df_feat.groupby('route')['temperature_celsius'].apply(lambda x: (x > 8.0).mean()).to_dict()
     df_feat['route_risk_score'] = df_feat['route'].map(risk_map)
     
-    # Add status indicator
+    # --- MODEL FEATURES ---
+    # Encode the route using the saved encoder
+    try:
+        df_feat['route_enc'] = le_route.transform(df_feat['route'])
+    except ValueError:
+        # If a new route appears that wasn't in training, assign a default value (0)
+        df_feat['route_enc'] = 0
+    
+    # Delay status flag
+    df_feat['is_delayed'] = (df_feat['status'] == 'delayed').astype(int)
+    
+    # Add status indicator (for your existing charts)
     df_feat['is_risk'] = (df_feat['temperature_celsius'] > 8.0).astype(int)
+    
     return df_feat
 
-# 3. Sidebar Filtering & Cache Control
+# 5. Sidebar Filtering & Cache Control
 st.sidebar.header("Filter Options")
 
 # Force Refresh button for your cache
@@ -54,7 +77,7 @@ filtered_df = df[df['status'].isin(selected_status)]
 # Sync filtering with the processed data
 filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)]
 
-# 4. Tabs and Professional Layout
+# 6. Tabs and Professional Layout
 tab1, tab2, tab3 = st.tabs(["📊 Overview", "📋 Raw Data", "🚀 Risk Intelligence"])
 
 with tab1:
@@ -83,6 +106,23 @@ with tab2:
 
 with tab3:
     st.subheader("Predictive Risk Intelligence")
+    
+    # --- NEW: Make predictions using the Advanced Model ---
+    # Prepare features in the exact order: ['route_enc', 'route_risk_score', 'is_delayed']
+    X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
+    
+    # Run the model predictions
+    filtered_df_ready['predicted_risk'] = model.predict(X_pred)
+    filtered_df_ready['risk_probability'] = model.predict_proba(X_pred)[:, 1]
+    
+    # Display new AI-powered metrics
+    col1, col2 = st.columns(2)
+    col1.metric("🚨 Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
+    col2.metric("🎯 Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
+    
+    st.divider()  # A nice line separator
+    
+    # --- Your existing High-Risk Routes Chart (still here!) ---
     st.markdown("### High-Risk Routes Analysis")
     route_risk = filtered_df_ready.groupby('route')['is_risk'].mean().reset_index()
     fig_risk = px.bar(route_risk.sort_values('is_risk', ascending=False).head(10), 
