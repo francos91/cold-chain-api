@@ -17,7 +17,7 @@ supabase = init_connection()
 
 @st.cache_data(ttl=600)
 def get_data():
-    # FIX: Added .range(0, 4999) to override the default 1,000-row limit
+    # FIX: Explicitly range to 4999 to pull your full 2,000+ dataset
     response = supabase.table("cold_chain_tracking").select("*").range(0, 4999).execute()
     return pd.DataFrame(response.data)
 
@@ -34,11 +34,17 @@ def engineer_features_for_app(df):
     df_feat['is_risk'] = (df_feat['temperature_celsius'] > 8.0).astype(int)
     return df_feat
 
+# 3. Sidebar Filtering & Cache Control
+st.sidebar.header("Filter Options")
+
+# Force Refresh button for your cache
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
+
 df = get_data()
 df_ready = engineer_features_for_app(df)
 
-# 3. Sidebar Filtering
-st.sidebar.header("Filter Options")
 selected_status = st.sidebar.multiselect("Select Status", options=df['status'].unique(), default=df['status'].unique())
 filtered_df = df[df['status'].isin(selected_status)]
 # Sync filtering with the processed data
@@ -73,8 +79,6 @@ with tab2:
 
 with tab3:
     st.subheader("Predictive Risk Intelligence")
-    
-    # Visualization: High Risk Routes
     st.markdown("### High-Risk Routes Analysis")
     route_risk = filtered_df_ready.groupby('route')['is_risk'].mean().reset_index()
     fig_risk = px.bar(route_risk.sort_values('is_risk', ascending=False).head(10), 
