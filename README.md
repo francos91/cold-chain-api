@@ -9,6 +9,19 @@ The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.str
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status and temperature excursions, providing actionable insights to identify high-risk transport corridors. The system includes a **live machine learning model** that predicts temperature breach risks for individual shipments based on historical route patterns.
 
+## System Architecture
+
+The following diagram illustrates the current architecture of the Cold Chain Logistics Pipeline:
+
+![System Architecture](system_architecture_v1.png)
+
+The system consists of:
+- **Data Generation (Colab)**: Feeder script generates synthetic data using the LaDe-trained delay predictor.
+- **Backend (Render)**: FastAPI serves as the data ingestion layer.
+- **Database (Supabase)**: PostgreSQL stores all shipment records.
+- **Frontend Dashboard (Streamlit)**: Four tabs provide analytics, risk intelligence, and thermal profiling.
+- **ML Models**: Random Forest model (`advanced_model.pkl`) and label encoder (`le_route.pkl`) are loaded directly into the dashboard for real-time predictions.
+
 ### Technical Architecture
 - **Data Ingestion**: A FastAPI service deployed on Render, handling REST API requests to securely ingest telemetry data.
 - **Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database, with separate tables for shipment records and time‑series temperature data.
