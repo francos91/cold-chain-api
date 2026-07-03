@@ -265,24 +265,28 @@ with tab4:
                 st.warning("⚠️ One of the shipments has no temperature data. Please select another.")
                 st.stop()
             
-            distance, path = fastdtw(temp1, temp2, dist=euclidean)
+            # ✅ SAFETY CHECK: If identical shipments, skip DTW
+            if selected_id == reference_id:
+                st.info("ℹ️ **Identical Shipments Selected**: Both dropdowns have the same shipment. Similarity is 100%.")
+                distance = 0
+                similarity = "🟢 Very Similar (Identical)"
+                insight = "These are the same shipment. The curves and route are identical."
+            else:
+                distance, path = fastdtw(temp1, temp2, dist=euclidean)
+                
+                # Determine similarity level
+                if distance < 5:
+                    similarity = "🟢 Very Similar"
+                    insight = "These shipments experienced nearly identical temperature patterns. If one breached, the other likely will too."
+                elif distance < 15:
+                    similarity = "🟡 Moderately Similar"
+                    insight = "These shipments share some patterns but differ in key areas. Focus on the differences in the curves."
+                else:
+                    similarity = "🔴 Very Different"
+                    insight = "These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, route)."
             
             # --- 1. SIMPLIFIED METRICS (Manager-Friendly) ---
             st.subheader("📊 Quick Summary")
-            
-            # Determine similarity level
-            if distance < 5:
-                similarity = "🟢 Very Similar"
-                similarity_color = "green"
-                insight = "These shipments experienced nearly identical temperature patterns. If one breached, the other likely will too."
-            elif distance < 15:
-                similarity = "🟡 Moderately Similar"
-                similarity_color = "orange"
-                insight = "These shipments share some patterns but differ in key areas. Focus on the differences in the curves."
-            else:
-                similarity = "🔴 Very Different"
-                similarity_color = "red"
-                insight = "These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, route)."
             
             col1, col2, col3 = st.columns(3)
             col1.metric("📊 Similarity Level", similarity)
@@ -354,7 +358,9 @@ with tab4:
                 st.success("✅ No breaches detected for the selected shipment.")
             
             # Insight 3: What to do next
-            if distance < 5:
+            if selected_id == reference_id:
+                st.info("📋 **Recommendation**: No comparison needed—you selected the same shipment twice. Select a different shipment to compare.")
+            elif distance < 5:
                 st.info("📋 **Recommendation**: Both shipments followed similar patterns. If one was delayed or breached, the other is at high risk. Consider proactive inspection.")
             elif distance < 15:
                 st.info("📋 **Recommendation**: Focus on the differences in the curves (spikes, slopes). Check if the reference shipment had better driver behavior or a different route.")
