@@ -275,19 +275,26 @@ with tab4:
     if len(same_status_ids) < 2:
         st.info("ℹ️ Not enough shipments with this status to build an average. Showing the selected curve only.")
         avg_curve = None
+        std_curve = None
     else:
         # Calculate the average temperature at each time point
         all_curves = []
+        valid_count = 0
         for sid in same_status_ids[:50]:  # Limit to 50 to avoid performance issues
-            curve = ts_df[ts_df['shipment_id'] == sid].sort_values('time_minutes')['temperature'].values
+            curve_df = ts_df[ts_df['shipment_id'] == sid].sort_values('time_minutes')
+            curve = curve_df['temperature'].values
             if len(curve) == 12:  # Only use complete curves
                 all_curves.append(curve)
+                valid_count += 1
         
         if len(all_curves) > 0:
             avg_curve = np.mean(all_curves, axis=0)
             std_curve = np.std(all_curves, axis=0)
+            st.info(f"ℹ️ Built average curve from {valid_count} shipments with status '{shipment_status}'.")
         else:
             avg_curve = None
+            std_curve = None
+            st.info(f"ℹ️ No complete temperature curves found for status '{shipment_status}'. Showing selected curve only.")
     
     # --- Display Metrics ---
     st.subheader("📊 Quick Summary")
@@ -310,7 +317,7 @@ with tab4:
     ))
     
     # Add the average curve (if available)
-    if avg_curve is not None:
+    if avg_curve is not None and len(avg_curve) > 0:
         times = ts_selected['time_minutes'].values
         fig.add_trace(go.Scatter(
             x=times, 
@@ -319,33 +326,52 @@ with tab4:
             name=f'Average ({shipment_status})',
             line=dict(color='orange', width=2, dash='dash')
         ))
-        # Add shaded error band
-        fig.add_trace(go.Scatter(
-            x=times.tolist() + times.tolist()[::-1],
-            y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
-            fill='toself',
-            fillcolor='rgba(255, 165, 0, 0.2)',
-            line=dict(color='rgba(255, 255, 255, 0)'),
-            name='±1 Std Dev',
-            showlegend=True
-        ))
+        # Add shaded error band if std_curve is available
+        if std_curve is not None and len(std_curve) > 0:
+            fig.add_trace(go.Scatter(
+                x=times.tolist() + times.tolist()[::-1],
+                y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
+                fill='toself',
+                fillcolor='rgba(255, 165, 0, 0.2)',
+                line=dict(color='rgba(255, 255, 255, 0)'),
+                name='±1 Std Dev',
+                showlegend=True
+            ))
         
-        # Calculate how similar the selected curve is to the average
+        # --- Calculate similarity metric with better error handling ---
         try:
-            distance, _ = fastdtw(ts_selected['temperature'].tolist(), avg_curve.tolist(), dist=euclidean)
-            # Normalize similarity (lower distance = more similar)
-            max_possible = 30  # Max possible DTW distance for this data
-            similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
-            col1, col2, col3 = st.columns(3)
-            col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
-            if similarity > 80:
-                st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
-            elif similarity > 60:
-                st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
+            # Get the selected curve as a list
+            selected_curve = ts_selected['temperature'].tolist()
+            avg_curve_list = avg_curve.tolist()
+            
+            # Check if both lists have data
+            if len(selected_curve) == 0 or len(avg_curve_list) == 0:
+                st.info("ℹ️ Unable to compute similarity metric: Insufficient data points.")
             else:
-                st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
-        except:
-            st.info("ℹ️ Unable to compute similarity metric.")
+                # Check if lists have the same length
+                if len(selected_curve) != len(avg_curve_list):
+                    st.info("ℹ️ Unable to compute similarity metric: Data length mismatch.")
+                else:
+                    # Compute DTW
+                    distance, _ = fastdtw(selected_curve, avg_curve_list, dist=euclidean)
+                    
+                    # Normalize similarity (lower distance = more similar)
+                    max_possible = 30  # Max possible DTW distance for this data
+                    similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
+                    
+                    if similarity > 80:
+                        st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
+                    elif similarity > 60:
+                        st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
+                    else:
+                        st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
+        except Exception as e:
+            st.info(f"ℹ️ Unable to compute similarity metric: {str(e)}")
+    else:
+        st.info("ℹ️ No average curve available for comparison.")
     
     fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
     fig.update_layout(
@@ -375,7 +401,7 @@ with tab4:
     fig_map.update_traces(marker=dict(size=8))
     st.plotly_chart(fig_map, use_container_width=True)
     
-    # --- Breach Detection (FIXED) ---
+    # --- Breach Detection ---
     breach_df = ts_selected[ts_selected['temperature'] > 8.0]
     if len(breach_df) > 0:
         first_breach = breach_df.iloc[0]
