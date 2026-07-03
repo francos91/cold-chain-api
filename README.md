@@ -6,15 +6,17 @@ A technical project demonstrating an end-to-end data pipeline for monitoring col
 
 The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/](https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/)
 
-
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status and temperature excursions, providing actionable insights to identify high-risk transport corridors. The system includes a **live machine learning model** that predicts temperature breach risks for individual shipments based on historical route patterns.
 
 ### Technical Architecture
 - **Data Ingestion**: A FastAPI service deployed on Render, handling REST API requests to securely ingest telemetry data.
-- **Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database.
+- **Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database, with separate tables for shipment records and time‑series temperature data.
 - **Data Visualization & Predictive Analytics**: Streamlit dashboard that processes live data, identifies temperature excursions, and visualizes route risk scores. **Integrated with a trained Random Forest model** to provide real-time risk predictions and probability scores for each shipment.
+- **Thermal Profile & GPS Analysis**: A dedicated tab allows users to visualize a shipment's 2‑hour temperature curve against the average for its status, with an interactive GPS route map colored by temperature and start/end markers.
 - **Model Deployment**: Serialized model and encoder (`joblib`) stored in GitHub and loaded into the Streamlit dashboard at runtime, ensuring consistency between training and production environments.
+
+### Repository Structure
 
 ### Repository Structure
 ```
@@ -32,12 +34,13 @@ cold-chain-logistics/
 └── README.md                # This file
 
 
-```   
+```
 ## Key Features
 - **Predictive Risk Intelligence**: Employs a Random Forest classifier (trained on historical route data) to predict temperature excursion risks in real-time. The model identifies high-risk corridors and provides per-shipment risk probabilities, enabling proactive intervention before breaches occur.
 - **Dynamic Risk Threshold Slider**: An interactive decision-support tool that allows logistics managers to adjust the classification threshold (10% – 90%) based on their operational risk tolerance. Lower thresholds catch more potential breaches (higher recall) while higher thresholds reduce false alarms (higher precision).
 - **Top 5 High-Risk Shipments Leaderboard**: Displays the five highest-risk active shipments sorted by probability score, allowing logistics managers to prioritize immediate action on the most critical cargo.
 - **Actionable Risk Filtering**: The high-risk shipments list automatically excludes already-delivered shipments, focusing only on active shipments where intervention is still possible.
+- **Thermal Profile & GPS Route Analysis**: Select any shipment to view its 2-hour temperature curve, compare it against the average for its status (delivered, delayed, in-transit, or at‑warehouse), and visualize the GPS route colored by temperature with start/end markers. This enables root‑cause analysis—identifying whether a breach occurred due to a sudden spike (door opening) or a gradual creep (refrigeration failure).
 - **Live Machine Learning Integration**: The trained model and encoder are serialized using `joblib` and deployed directly within the Streamlit dashboard, delivering on-demand risk predictions for filtered datasets.
 - **Interactive Filtering & Analytics**: Real-time dashboard filtering by shipment status, with dynamic updates to both historical metrics and AI-powered risk predictions.
 - **Scalable Data Pipeline**: Secure data ingestion via a FastAPI backend (deployed on Render), with Supabase (PostgreSQL) as the cloud data store.
@@ -76,6 +79,16 @@ The synthetic dataset was generated using statistical parameters extracted from 
 - Western Cape orange cold store airlock research
 - Gauteng last-mile delivery temperature studies
 - Refrigeration performance at Johannesburg altitude (1,750m)
+
+## Thermal Profile & GPS Route Analysis
+The **Thermal Profile** tab provides an Industrial Engineering diagnostic tool that allows logistics managers to:
+
+- **Visualize temperature curves**: See a shipment's 2‑hour temperature journey with the average curve for its status (delivered, delayed, in-transit, or at‑warehouse) for context.
+- **Detect breaches**: Identify exactly when and where a shipment exceeded the 8°C threshold.
+- **Analyze GPS routes**: View the shipment's route on an OpenStreetMap, colored by temperature, with start (🟢) and end (🔴) markers.
+- **Compare to average**: Instantly see whether a shipment is warmer or cooler than the typical shipment with the same status.
+
+**Example Insight**: A shipment that breaches at `0 minutes` indicates it was loaded warm at the origin—pointing to poor pre‑cooling procedures rather than in‑transit issues. This level of analysis enables targeted corrective actions.
 
 ## ML-Powered Delay Prediction (LaDe Integration)
 To move beyond random assignment of delays, the system integrates a **delay prediction model trained on the LaDe dataset**—a publicly available, industrial-scale last-mile delivery dataset from China containing **4.5 million real deliveries** across multiple cities.
@@ -124,9 +137,13 @@ The dashboard includes an interactive **Risk Threshold Slider** that allows user
 - [ ] Add a "What-If" simulation tool to evaluate the impact of route changes on risk scores.
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
+- [ ] Add a "Similar Shipments" view to group shipments with matching temperature profiles.
 
 ## Notes
 - This project uses synthetic data to simulate real-world cold chain conditions. The system is designed to accept live IoT sensor data with zero code changes.
 - The dashboard includes pagination to handle large datasets efficiently, ensuring scalability as the database grows.
 - The synthetic data generator is grounded in South African cold chain literature, making it suitable for academic research and industrial engineering applications.
 - **The LaDe delay predictor** adds empirical real-world grounding to the delay simulation, trained on 4.5 million real deliveries from urban China.
+- **The Thermal Profile tab** uses real GPS routes generated via OpenStreetMap (OSRM) and includes time‑series temperature data for each shipment, enabling precise root‑cause analysis.
+
+   
