@@ -228,11 +228,11 @@ with tab3:
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
 
 # =============================================
-# TAB 4: THERMAL PROFILE (Time-Series + DTW)
+# TAB 4: THERMAL PROFILE (Time-Series + DTW) - MANAGER-FRIENDLY
 # =============================================
 with tab4:
     st.subheader("📈 Thermal Profile Analysis")
-    st.markdown("Compare temperature curves and GPS routes between shipments.")
+    st.markdown("Compare temperature patterns between shipments and get actionable insights.")
     
     # Fetch time-series data
     with st.spinner("Loading thermal profile data..."):
@@ -248,29 +248,49 @@ with tab4:
         # --- Select Shipments to Compare ---
         col1, col2 = st.columns(2)
         with col1:
-            selected_id = st.selectbox("Select Shipment", shipment_ids, index=0)
+            selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
         with col2:
-            reference_id = st.selectbox("Reference Shipment", shipment_ids, index=min(1, len(shipment_ids)-1))
+            reference_id = st.selectbox("🔴 Compare Against (Reference)", shipment_ids, index=min(1, len(shipment_ids)-1))
         
         # Fetch curves for both shipments
         ts1 = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
         ts2 = ts_df[ts_df['shipment_id'] == reference_id].sort_values('time_minutes')
         
         if len(ts1) > 0 and len(ts2) > 0:
-            # --- Compute DTW Distance ---
             temp1 = ts1['temperature'].tolist()
             temp2 = ts2['temperature'].tolist()
             
+            # ✅ SAFETY CHECK: Ensure both lists have data
+            if len(temp1) == 0 or len(temp2) == 0:
+                st.warning("⚠️ One of the shipments has no temperature data. Please select another.")
+                st.stop()
+            
             distance, path = fastdtw(temp1, temp2, dist=euclidean)
             
-            # --- Display Metrics ---
+            # --- 1. SIMPLIFIED METRICS (Manager-Friendly) ---
+            st.subheader("📊 Quick Summary")
+            
+            # Determine similarity level
+            if distance < 5:
+                similarity = "🟢 Very Similar"
+                similarity_color = "green"
+                insight = "These shipments experienced nearly identical temperature patterns. If one breached, the other likely will too."
+            elif distance < 15:
+                similarity = "🟡 Moderately Similar"
+                similarity_color = "orange"
+                insight = "These shipments share some patterns but differ in key areas. Focus on the differences in the curves."
+            else:
+                similarity = "🔴 Very Different"
+                similarity_color = "red"
+                insight = "These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, route)."
+            
             col1, col2, col3 = st.columns(3)
-            col1.metric("🔗 DTW Distance", round(distance, 2), help="Lower = more similar temperature patterns")
+            col1.metric("📊 Similarity Level", similarity)
             col2.metric("🌡️ Avg Temp (Selected)", f"{ts1['temperature'].mean():.1f}°C")
             col3.metric("🌡️ Avg Temp (Reference)", f"{ts2['temperature'].mean():.1f}°C")
             
-            # --- 1. Temperature Curve Plot (Root Cause Analysis) ---
-            st.subheader("📊 Temperature Curves")
+            # --- 2. TEMPERATURE CURVES ---
+            st.subheader("📈 Temperature Profile Comparison")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=ts1['time_minutes'], 
@@ -286,7 +306,7 @@ with tab4:
                 name=f'{reference_id}',
                 line=dict(color='red', width=2)
             ))
-            fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="Breach Threshold (8°C)")
+            fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
             fig.update_layout(
                 title=f"Temperature Profile: {selected_id} vs {reference_id}",
                 xaxis_title="Time (minutes)",
@@ -296,7 +316,7 @@ with tab4:
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- 2. Geospatial Map (Where did it breach?) ---
+            # --- 3. GPS ROUTE MAP ---
             st.subheader("🗺️ GPS Route (Colored by Temperature)")
             
             fig_map = px.scatter_mapbox(
@@ -315,13 +335,31 @@ with tab4:
             fig_map.update_traces(marker=dict(size=8))
             st.plotly_chart(fig_map, use_container_width=True)
             
-            # --- 3. Interpretation (Utility) ---
-            st.subheader("📋 Analysis Interpretation")
-            if distance < 5:
-                st.success("✅ **Similar Profiles**: These two shipments have very similar temperature patterns. The same operational factors likely influenced both.")
-            elif distance < 15:
-                st.info("ℹ️ **Moderately Similar**: These shipments share some patterns but differ in key areas. Check the route and timing for differences.")
+            # --- 4. ACTIONABLE INSIGHTS (The "So What?") ---
+            st.subheader("💡 Actionable Insights")
+            
+            # Insight 1: What does the similarity mean?
+            st.markdown(f"**{similarity}** — {insight}")
+            
+            # Insight 2: Breach detection
+            if len(ts1[ts1['temperature'] > 8.0]) > 0:
+                breach_points = ts1[ts1['temperature'] > 8.0]
+                first_breach = breach_points.iloc[0]
+                st.warning(f"""
+                ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
+                - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
+                - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
+                """)
             else:
-                st.warning("⚠️ **Different Profiles**: These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, or route).")
+                st.success("✅ No breaches detected for the selected shipment.")
+            
+            # Insight 3: What to do next
+            if distance < 5:
+                st.info("📋 **Recommendation**: Both shipments followed similar patterns. If one was delayed or breached, the other is at high risk. Consider proactive inspection.")
+            elif distance < 15:
+                st.info("📋 **Recommendation**: Focus on the differences in the curves (spikes, slopes). Check if the reference shipment had better driver behavior or a different route.")
+            else:
+                st.info("📋 **Recommendation**: Investigate the root cause of the difference. Compare the GPS routes to see if one shipment took a riskier path.")
+            
         else:
             st.warning("One or both shipments have no time-series data.")
