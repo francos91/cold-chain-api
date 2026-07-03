@@ -96,6 +96,7 @@ The synthetic dataset was generated using statistical parameters extracted from 
 ## Thermal Profile & GPS Route Analysis
 The **Thermal Profile** tab provides an Industrial Engineering diagnostic tool that allows logistics managers to:
 
+
 - **Visualize temperature curves**: See a shipment's 2‑hour temperature journey with the average curve for its status (delivered, delayed, in-transit, or at‑warehouse) for context.
 - **Detect breaches**: Identify exactly when and where a shipment exceeded the 8°C threshold.
 - **Analyze GPS routes**: View the shipment's route on an OpenStreetMap, colored by temperature, with start (🟢) and end (🔴) markers.
@@ -132,6 +133,25 @@ The dashboard includes an interactive **Risk Threshold Slider** that allows user
 - **Align with business needs**: Match the model's behavior to operational risk tolerance and financial constraints.
 - **See immediate feedback**: The "Predicted High-Risk Shipments" count and the high-risk lists update instantly as the slider is moved.
 
+- ## Decision-Support Tools
+
+The dashboard includes an interactive **Risk Threshold Slider** that allows users to:
+...
+- ## SCOR-Aligned Performance KPIs
+
+The **Overview** tab has been enhanced with a set of **SCOR (Supply Chain Operations Reference) aligned KPIs**, providing a professional, industry-standard view of supply chain performance.
+
+| KPI | SCOR Attribute | Description |
+| :--- | :--- | :--- |
+| **Perfect Order Rate** | Reliability (RL.1.1) | Percentage of shipments delivered on‑time **and** without temperature breach. |
+| **On‑Time Delivery** | Reliability (RL.2.2) | Percentage of shipments that are not delayed. |
+| **Temperature Compliance** | Reliability (RL.2.4) | Percentage of shipments maintained within the 8°C safety threshold. |
+| **Average Transit Time** | Responsiveness (RS.1.1) | The average journey time (hours) per shipment, derived from time‑series data. |
+| **Cost per Shipment** | Cost (CO.3.15) | Estimated cost per shipment based on distance (R18/km + fixed handling cost). |
+
+**Value at Risk (VaR)** and **Capacity Utilization** are also calculated in the background to support Agility (AG.1.3) and Asset Management (AM.3.9) metrics, providing a complete SCOR performance profile.
+
+
 ## Dataset Statistics
 | Category | Count | Source |
 | :--- | :--- | :--- |
@@ -159,4 +179,4 @@ The dashboard includes an interactive **Risk Threshold Slider** that allows user
 - **The LaDe delay predictor** adds empirical real-world grounding to the delay simulation, trained on 4.5 million real deliveries from urban China.
 - **The Thermal Profile tab** uses real GPS routes generated via OpenStreetMap (OSRM) and includes time‑series temperature data for each shipment, enabling precise root‑cause analysis.
 
-   
+ - **SCOR Integration**: The dashboard's Overview tab includes supply chain KPIs mapped to the SCOR framework (Reliability, Responsiveness, Agility, Cost, and Asset Management), aligning the project with internationally recognized supply chain performance standards.
