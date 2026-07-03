@@ -229,11 +229,11 @@ with tab3:
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
 
 # =============================================
-# TAB 4: THERMAL PROFILE (Time-Series + DTW) - MANAGER-FRIENDLY
+# TAB 4: THERMAL PROFILE (SIMPLIFIED - Single Shipment vs Average)
 # =============================================
 with tab4:
     st.subheader("📈 Thermal Profile Analysis")
-    st.markdown("Compare temperature patterns between shipments and get actionable insights.")
+    st.markdown("Compare a shipment's temperature curve against the average pattern for similar shipments.")
     
     # Fetch time-series data
     with st.spinner("Loading thermal profile data..."):
@@ -247,137 +247,140 @@ with tab4:
     # Get unique shipment IDs
     shipment_ids = ts_df['shipment_id'].unique()
     
-    # --- Select Shipments to Compare ---
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
-    with col2:
-        # Ensure the second dropdown doesn't default to the same as first (use index 1 if available)
-        default_idx = 1 if len(shipment_ids) > 1 else 0
-        reference_id = st.selectbox("🔴 Compare Against (Reference)", shipment_ids, index=default_idx)
+    # --- Select a Single Shipment ---
+    selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
     
-    # Fetch curves for both shipments
-    ts1 = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
-    ts2 = ts_df[ts_df['shipment_id'] == reference_id].sort_values('time_minutes')
+    # Fetch the selected shipment's curve
+    ts_selected = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
     
-    if len(ts1) > 0 and len(ts2) > 0:
-        temp1 = ts1['temperature'].tolist()
-        temp2 = ts2['temperature'].tolist()
-        
-        # Safety: if lists are empty, show warning
-        if len(temp1) == 0 or len(temp2) == 0:
-            st.warning("⚠️ One of the shipments has no temperature data. Please select another.")
-            st.stop()
-        
-        # --- Identical shipment check ---
-        if selected_id == reference_id:
-            st.info("ℹ️ **Identical Shipments Selected**: Both dropdowns have the same shipment. Similarity is 100%.")
-            distance = 0
-            similarity = "🟢 Very Similar (Identical)"
-            insight = "These are the same shipment. The curves and route are identical."
-        else:
-            # Compute DTW with try/except to catch any errors
-            try:
-                distance, path = fastdtw(temp1, temp2, dist=euclidean)
-            except Exception as e:
-                st.error(f"⚠️ Error computing similarity: {e}")
-                distance = np.inf
-                similarity = "🔴 Error"
-                insight = "Unable to compute similarity. Please try different shipments."
-            
-            # Determine similarity level (only if we have a valid distance)
-            if distance != np.inf:
-                if distance < 5:
-                    similarity = "🟢 Very Similar"
-                    insight = "These shipments experienced nearly identical temperature patterns. If one breached, the other likely will too."
-                elif distance < 15:
-                    similarity = "🟡 Moderately Similar"
-                    insight = "These shipments share some patterns but differ in key areas. Focus on the differences in the curves."
-                else:
-                    similarity = "🔴 Very Different"
-                    insight = "These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, route)."
-        
-        # --- 1. SIMPLIFIED METRICS (Manager-Friendly) ---
-        st.subheader("📊 Quick Summary")
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("📊 Similarity Level", similarity)
-        col2.metric("🌡️ Avg Temp (Selected)", f"{ts1['temperature'].mean():.1f}°C")
-        col3.metric("🌡️ Avg Temp (Reference)", f"{ts2['temperature'].mean():.1f}°C")
-        
-        # --- 2. TEMPERATURE CURVES ---
-        st.subheader("📈 Temperature Profile Comparison")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=ts1['time_minutes'], 
-            y=ts1['temperature'], 
-            mode='lines+markers', 
-            name=f'{selected_id}',
-            line=dict(color='blue', width=2)
-        ))
-        fig.add_trace(go.Scatter(
-            x=ts2['time_minutes'], 
-            y=ts2['temperature'], 
-            mode='lines+markers', 
-            name=f'{reference_id}',
-            line=dict(color='red', width=2)
-        ))
-        fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
-        fig.update_layout(
-            title=f"Temperature Profile: {selected_id} vs {reference_id}",
-            xaxis_title="Time (minutes)",
-            yaxis_title="Temperature (°C)",
-            height=400,
-            hovermode='x unified'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # --- 3. GPS ROUTE MAP ---
-        st.subheader("🗺️ GPS Route (Colored by Temperature)")
-        
-        fig_map = px.scatter_mapbox(
-            ts1,
-            lat="latitude",
-            lon="longitude",
-            color="temperature",
-            hover_name="time_minutes",
-            hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
-            title=f"Route for {selected_id}",
-            color_continuous_scale="RdYlBu_r",
-            zoom=6,
-            height=450
-        )
-        fig_map.update_layout(mapbox_style="open-street-map")
-        fig_map.update_traces(marker=dict(size=8))
-        st.plotly_chart(fig_map, use_container_width=True)
-        
-        # --- 4. ACTIONABLE INSIGHTS (The "So What?") ---
-        st.subheader("💡 Actionable Insights")
-        
-        # Insight 1: What does the similarity mean?
-        st.markdown(f"**{similarity}** — {insight}")
-        
-        # Insight 2: Breach detection
-        if len(ts1[ts1['temperature'] > 8.0]) > 0:
-            breach_points = ts1[ts1['temperature'] > 8.0]
-            first_breach = breach_points.iloc[0]
-            st.warning(f"""
-            ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
-            - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
-            - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
-            """)
-        else:
-            st.success("✅ No breaches detected for the selected shipment.")
-        
-        # Insight 3: What to do next
-        if selected_id == reference_id:
-            st.info("📋 **Recommendation**: No comparison needed—you selected the same shipment twice. Select a different shipment to compare.")
-        elif distance < 5:
-            st.info("📋 **Recommendation**: Both shipments followed similar patterns. If one was delayed or breached, the other is at high risk. Consider proactive inspection.")
-        elif distance < 15:
-            st.info("📋 **Recommendation**: Focus on the differences in the curves (spikes, slopes). Check if the reference shipment had better driver behavior or a different route.")
-        else:
-            st.info("📋 **Recommendation**: Investigate the root cause of the difference. Compare the GPS routes to see if one shipment took a riskier path.")
-        
+    if len(ts_selected) == 0:
+        st.warning("⚠️ No temperature data found for this shipment.")
+        st.stop()
+    
+    # Get the status of the selected shipment from the parent table
+    status_resp = supabase.table("cold_chain_tracking").select("status").eq("shipment_id", selected_id).execute()
+    if len(status_resp.data) == 0:
+        st.warning("⚠️ Shipment not found in the main table.")
+        st.stop()
+    shipment_status = status_resp.data[0]['status']
+    
+    # --- Build the "Average Curve" for this status ---
+    # Get all shipments with the same status
+    same_status_ids = ts_df[ts_df['shipment_id'].isin(
+        supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute().data
+    )]['shipment_id'].unique()
+    
+    if len(same_status_ids) < 2:
+        st.info("ℹ️ Not enough shipments with this status to build an average. Showing the selected curve only.")
+        avg_curve = None
     else:
-        st.warning("One or both shipments have no time-series data.")
+        # Calculate the average temperature at each time point
+        all_curves = []
+        for sid in same_status_ids[:50]:  # Limit to 50 to avoid performance issues
+            curve = ts_df[ts_df['shipment_id'] == sid].sort_values('time_minutes')['temperature'].values
+            if len(curve) == 12:  # Only use complete curves
+                all_curves.append(curve)
+        
+        if len(all_curves) > 0:
+            avg_curve = np.mean(all_curves, axis=0)
+            std_curve = np.std(all_curves, axis=0)
+        else:
+            avg_curve = None
+    
+    # --- Display Metrics ---
+    st.subheader("📊 Quick Summary")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📦 Shipment", selected_id)
+    col2.metric("📌 Status", shipment_status.capitalize())
+    col3.metric("🌡️ Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
+    
+    # --- Plot the Temperature Curve ---
+    st.subheader("📈 Temperature Profile")
+    fig = go.Figure()
+    
+    # Add the selected shipment
+    fig.add_trace(go.Scatter(
+        x=ts_selected['time_minutes'], 
+        y=ts_selected['temperature'], 
+        mode='lines+markers', 
+        name=f'{selected_id} ({shipment_status})',
+        line=dict(color='blue', width=3)
+    ))
+    
+    # Add the average curve (if available)
+    if avg_curve is not None:
+        times = ts_selected['time_minutes'].values
+        fig.add_trace(go.Scatter(
+            x=times, 
+            y=avg_curve, 
+            mode='lines', 
+            name=f'Average ({shipment_status})',
+            line=dict(color='orange', width=2, dash='dash')
+        ))
+        # Add shaded error band
+        fig.add_trace(go.Scatter(
+            x=times.tolist() + times.tolist()[::-1],
+            y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
+            fill='toself',
+            fillcolor='rgba(255, 165, 0, 0.2)',
+            line=dict(color='rgba(255, 255, 255, 0)'),
+            name='±1 Std Dev',
+            showlegend=True
+        ))
+        
+        # Calculate how similar the selected curve is to the average
+        try:
+            distance, _ = fastdtw(ts_selected['temperature'].tolist(), avg_curve.tolist(), dist=euclidean)
+            # Normalize similarity (lower distance = more similar)
+            max_possible = 30  # Max possible DTW distance for this data
+            similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
+            col1, col2, col3 = st.columns(3)
+            col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
+            if similarity > 80:
+                st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
+            elif similarity > 60:
+                st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
+            else:
+                st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
+        except:
+            st.info("ℹ️ Unable to compute similarity metric.")
+    
+    fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
+    fig.update_layout(
+        title=f"Temperature Profile: {selected_id} (Status: {shipment_status})",
+        xaxis_title="Time (minutes)",
+        yaxis_title="Temperature (°C)",
+        height=450,
+        hovermode='x unified'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # --- GPS Route Map ---
+    st.subheader("🗺️ GPS Route (Colored by Temperature)")
+    fig_map = px.scatter_mapbox(
+        ts_selected,
+        lat="latitude",
+        lon="longitude",
+        color="temperature",
+        hover_name="time_minutes",
+        hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+        title=f"Route for {selected_id}",
+        color_continuous_scale="RdYlBu_r",
+        zoom=6,
+        height=400
+    )
+    fig_map.update_layout(mapbox_style="open-street-map")
+    fig_map.update_traces(marker=dict(size=8))
+    st.plotly_chart(fig_map, use_container_width=True)
+    
+    # --- Breach Detection ---
+    if len(ts_selected[ts_selected['temperature'] > 8.0]) > 0:
+        breach_points = ts_selected[ts_selected['temperature'] > 8.0]
+        first_breach = breach_points.iloc[0]
+        st.warning(f"""
+        ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
+        - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
+        - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
+        """)
+    else:
+        st.success("✅ No breaches detected for the selected shipment.")
