@@ -265,10 +265,12 @@ with tab4:
     shipment_status = status_resp.data[0]['status']
     
     # --- Build the "Average Curve" for this status ---
-    # Get all shipments with the same status
-    same_status_ids = ts_df[ts_df['shipment_id'].isin(
-        supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute().data
-    )]['shipment_id'].unique()
+    # Get all shipments with the same status from the parent table FIRST
+    status_resp_all = supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute()
+    same_status_ids = [row['shipment_id'] for row in status_resp_all.data]
+    
+    # Now filter the time-series data to only include these shipments
+    same_status_ts = ts_df[ts_df['shipment_id'].isin(same_status_ids)]
     
     if len(same_status_ids) < 2:
         st.info("ℹ️ Not enough shipments with this status to build an average. Showing the selected curve only.")
@@ -373,12 +375,13 @@ with tab4:
     fig_map.update_traces(marker=dict(size=8))
     st.plotly_chart(fig_map, use_container_width=True)
     
-    # --- Breach Detection ---
-    if len(ts_selected[ts_selected['temperature'] > 8.0]) > 0:
-        breach_points = ts_selected[ts_selected['temperature'] > 8.0]
-        first_breach = breach_points.iloc[0]
+    # --- Breach Detection (FIXED) ---
+    breach_df = ts_selected[ts_selected['temperature'] > 8.0]
+    if len(breach_df) > 0:
+        first_breach = breach_df.iloc[0]
+        breach_time = first_breach['time_minutes']
         st.warning(f"""
-        ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
+        ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{breach_time} minutes**.
         - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
         - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
         """)
