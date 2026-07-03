@@ -338,36 +338,43 @@ with tab4:
                 showlegend=True
             ))
         
-        # --- Calculate similarity metric with better error handling ---
+        # --- Calculate similarity metric with robust data validation ---
         try:
             # Get the selected curve as a list
             selected_curve = ts_selected['temperature'].tolist()
-            avg_curve_list = avg_curve.tolist()
+            avg_curve_list = avg_curve.tolist() if avg_curve is not None else []
             
-            # Check if both lists have data
-            if len(selected_curve) == 0 or len(avg_curve_list) == 0:
-                st.info("ℹ️ Unable to compute similarity metric: Insufficient data points.")
+            # --- DATA VALIDATION (FIXES THE ERROR) ---
+            # Check 1: Is the selected curve empty?
+            if len(selected_curve) == 0:
+                st.info("ℹ️ Unable to compute similarity: The selected shipment has no temperature data.")
+            # Check 2: Is the average curve empty?
+            elif len(avg_curve_list) == 0:
+                st.info("ℹ️ Unable to compute similarity: The average curve is empty.")
+            # Check 3: Do the curves have the same length?
+            elif len(selected_curve) != len(avg_curve_list):
+                st.info(f"ℹ️ Unable to compute similarity: Data length mismatch ({len(selected_curve)} vs {len(avg_curve_list)}).")
+            # Check 4: Are there any NaN or infinite values?
+            elif any(np.isnan(selected_curve)) or any(np.isnan(avg_curve_list)):
+                st.info("ℹ️ Unable to compute similarity: Invalid data (NaN values detected).")
             else:
-                # Check if lists have the same length
-                if len(selected_curve) != len(avg_curve_list):
-                    st.info("ℹ️ Unable to compute similarity metric: Data length mismatch.")
+                # All checks passed — compute DTW
+                distance, _ = fastdtw(selected_curve, avg_curve_list, dist=euclidean)
+                
+                # Normalize similarity (lower distance = more similar)
+                max_possible = 30
+                similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
+                
+                if similarity > 80:
+                    st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
+                elif similarity > 60:
+                    st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
                 else:
-                    # Compute DTW
-                    distance, _ = fastdtw(selected_curve, avg_curve_list, dist=euclidean)
+                    st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
                     
-                    # Normalize similarity (lower distance = more similar)
-                    max_possible = 30  # Max possible DTW distance for this data
-                    similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
-                    
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
-                    
-                    if similarity > 80:
-                        st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
-                    elif similarity > 60:
-                        st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
-                    else:
-                        st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
         except Exception as e:
             st.info(f"ℹ️ Unable to compute similarity metric: {str(e)}")
     else:
