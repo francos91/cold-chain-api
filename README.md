@@ -1,4 +1,4 @@
-# Cold Chain Logistics Pipeline
+# Cold Chain Logistics Transport Intelligence Dashboard
 
 A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
 
