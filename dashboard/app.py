@@ -112,7 +112,6 @@ with tab1:
 
 with tab2:
     st.subheader("Logistics Data Table")
-    # Restored your original professional column configuration
     st.dataframe(
         filtered_df,
         use_container_width=True,
@@ -138,17 +137,15 @@ with tab3:
         value=50,
         step=5,
         help="Lower threshold = catches more breaches (higher recall), but may increase false alarms (lower precision)."
-    ) / 100.0  # Convert to decimal (e.g., 50 -> 0.50)
+    ) / 100.0
     
     st.caption(f"⚙️ Currently using a **{threshold*100:.0f}%** threshold. Shipments with a probability above this are flagged as high-risk.")
     
     # --- Prepare features for the model ---
     X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
     
-    # --- Get probabilities (not just binary predictions) ---
+    # --- Get probabilities ---
     filtered_df_ready['risk_probability'] = model.predict_proba(X_pred)[:, 1]
-    
-    # --- Apply the dynamic threshold to get binary predictions ---
     filtered_df_ready['predicted_risk'] = (filtered_df_ready['risk_probability'] >= threshold).astype(int)
     
     # --- Display AI-powered metrics ---
@@ -161,13 +158,11 @@ with tab3:
     # --- 🚨 Top 5 Highest Risk Shipments (Leaderboard) ---
     st.markdown("### 🚨 Top 5 Highest Risk Shipments")
     
-    # Filter to show only predicted high-risk shipments that are NOT already delivered
     high_risk_df = filtered_df_ready[
         (filtered_df_ready['predicted_risk'] == 1) & 
         (filtered_df_ready['status'] != 'delivered')
     ]
     
-    # Sort by risk probability (highest first) and take top 5
     top_5_df = high_risk_df.sort_values('risk_probability', ascending=False).head(5)
     
     if len(top_5_df) > 0:
@@ -185,7 +180,6 @@ with tab3:
             }
         )
         
-        # Show the highest risk probability as a bold metric
         highest_risk = top_5_df.iloc[0]
         st.metric(
             f"⚠️ Highest Risk: {highest_risk['shipment_id']}", 
@@ -229,7 +223,7 @@ with tab3:
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
 
 # =============================================
-# TAB 4: THERMAL PROFILE (Filtered by Status)
+# TAB 4: THERMAL PROFILE (Filtered by Status) - FIXED
 # =============================================
 with tab4:
     st.subheader("📈 Thermal Profile Analysis")
@@ -245,13 +239,12 @@ with tab4:
         st.stop()
     
     # --- FILTER BY SIDEBAR STATUS ---
-    # Get the current sidebar selection
     if len(selected_status) == 0:
         st.info("ℹ️ No status selected in the sidebar. Please select at least one status.")
         st.stop()
     
     # Get shipment IDs that match the selected status(es)
-    status_resp = supabase.table("cold_chain_tracking").select("shipment_id", "status").in_("status", selected_status).execute()
+    status_resp = supabase.table("cold_chain_tracking").select("shipment_id").in_("status", selected_status).execute()
     filtered_shipment_ids = [row['shipment_id'] for row in status_resp.data]
     
     if len(filtered_shipment_ids) == 0:
@@ -278,8 +271,12 @@ with tab4:
         st.warning("⚠️ No temperature data found for this shipment.")
         st.stop()
     
-    # Get the status of the selected shipment
-    shipment_status = ts_selected['status'].iloc[0] if 'status' in ts_selected.columns else "Unknown"
+    # --- Get the status of the selected shipment from the parent table ---
+    status_resp_single = supabase.table("cold_chain_tracking").select("status").eq("shipment_id", selected_id).execute()
+    if len(status_resp_single.data) == 0:
+        st.warning("⚠️ Shipment not found in the main table.")
+        st.stop()
+    shipment_status = status_resp_single.data[0]['status']
     
     # --- Display Metrics ---
     st.subheader("📊 Quick Summary")
@@ -291,8 +288,12 @@ with tab4:
     # --- COMPARE TO AVERAGE ---
     st.subheader("📊 Comparison to Average")
     
-    # Get all shipments with the same status
-    same_status_data = ts_df_filtered[ts_df_filtered['status'] == shipment_status]
+    # Get all shipment IDs with the same status from the parent table
+    status_resp_all = supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute()
+    same_status_ids = [row['shipment_id'] for row in status_resp_all.data]
+    
+    # Filter time-series data to only include these shipments (and also respect the sidebar filter)
+    same_status_data = ts_df_filtered[ts_df_filtered['shipment_id'].isin(same_status_ids)]
     
     if len(same_status_data) > 0:
         # Group by shipment_id and calculate average temp for each
