@@ -75,6 +75,28 @@ def engineer_features_for_app(df):
     # Add status indicator (for your existing charts)
     df_feat['is_risk'] = (df_feat['temperature_celsius'] > 8.0).astype(int)
     
+    # --- SCOR KPIs ---
+    # 1. Perfect Order Fulfillment (RL.1.1) – On‑Time + No Breach
+    df_feat['is_ontime'] = (df_feat['status'] != 'delayed').astype(int)
+    df_feat['is_compliant'] = (df_feat['is_risk'] == 0).astype(int)
+    df_feat['is_perfect'] = ((df_feat['is_ontime'] == 1) & (df_feat['is_compliant'] == 1)).astype(int)
+    
+    # 2. Responsiveness (RS.1.1) – transit_time_hours is already in the data
+    # (No new column needed; it's already in df_feat)
+    
+    # 3. Cost per Shipment (CO.3.15) – using distance_km
+    cost_per_km = 18  # ZAR/km (typical heavy vehicle)
+    fixed_cost = 200  # ZAR per shipment
+    # distance_km is already in the data (populated earlier)
+    df_feat['cost_per_shipment'] = (df_feat['distance_km'] * cost_per_km) + fixed_cost
+    
+    # 4. Value at Risk (AG.1.3) – route_risk_score × impact
+    impact_per_breach = 50000  # ZAR (estimated loss)
+    df_feat['vaR_ZAR'] = df_feat['route_risk_score'] * impact_per_breach
+    
+    # 5. Capacity Utilization (AM.3.9) – simulate (no real load data)
+    df_feat['capacity_utilization'] = np.random.uniform(70, 90, len(df_feat))  # %
+    
     return df_feat
 
 # 5. Sidebar Filtering & Cache Control
@@ -101,14 +123,39 @@ filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)]
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📋 Raw Data", "🚀 Risk Intelligence", "📈 Thermal Profile"])
 
 with tab1:
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Shipments", len(filtered_df))
-    col2.metric("Avg Temp (°C)", round(filtered_df['temperature_celsius'].mean(), 2))
-    col3.metric("Delayed Shipments", len(filtered_df[filtered_df['status'] == 'delayed']))
+    st.subheader("📊 SCOR-Aligned Performance Overview")
     
-    st.subheader("Temperature Distribution")
+    # --- KPI Cards ---
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    perfect_rate = filtered_df_ready['is_perfect'].mean() * 100
+    ontime_rate = filtered_df_ready['is_ontime'].mean() * 100
+    temp_compliance = filtered_df_ready['is_compliant'].mean() * 100
+    avg_transit = filtered_df_ready['transit_time_hours'].mean()
+    avg_cost = filtered_df_ready['cost_per_shipment'].mean()
+    
+    col1.metric("📦 Perfect Order Rate", f"{perfect_rate:.1f}%")
+    col2.metric("⏱️ On‑Time Delivery", f"{ontime_rate:.1f}%")
+    col3.metric("🌡️ Temp Compliance", f"{temp_compliance:.1f}%")
+    col4.metric("🚚 Avg Transit (h)", f"{avg_transit:.1f}")
+    col5.metric("💰 Avg Cost (ZAR)", f"R{avg_cost:,.0f}")
+    
+    st.divider()
+    
+    # --- Existing Temperature Distribution (keep it) ---
+    st.subheader("🌡️ Temperature Distribution")
     fig = px.histogram(filtered_df, x="temperature_celsius", nbins=20, color_discrete_sequence=['#008080'])
     st.plotly_chart(fig, use_container_width=True)
+    
+    # --- Optional: SCOR Framework Expander ---
+    with st.expander("📘 SCOR Framework Alignment"):
+        st.markdown("""
+        **Reliability (RL.1.1)** – Perfect Order Fulfillment (On‑Time + No Breach)  
+        **Responsiveness (RS.1.1)** – Average Transit Time (hours)  
+        **Agility (AG.1.3)** – Value at Risk (route_risk_score × impact)  
+        **Cost (CO.3.15)** – Cost per Shipment (distance × ZAR/km + fixed)  
+        **Asset Management (AM.3.9)** – Capacity Utilization (simulated)  
+        """)
 
 with tab2:
     st.subheader("Logistics Data Table")
