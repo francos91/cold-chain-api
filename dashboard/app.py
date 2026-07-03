@@ -229,11 +229,11 @@ with tab3:
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
 
 # =============================================
-# TAB 4: THERMAL PROFILE (SIMPLIFIED - Single Shipment vs Average)
+# TAB 4: THERMAL PROFILE (Filtered by Status)
 # =============================================
 with tab4:
     st.subheader("📈 Thermal Profile Analysis")
-    st.markdown("Compare a shipment's temperature curve against the average pattern for similar shipments.")
+    st.markdown("View the temperature curve and GPS route for a shipment, compared to the average for its status.")
     
     # Fetch time-series data
     with st.spinner("Loading thermal profile data..."):
@@ -244,57 +244,42 @@ with tab4:
         st.warning("⚠️ No time-series data found. Please run the temperature_stream generator first.")
         st.stop()
     
-    # Get unique shipment IDs
-    shipment_ids = ts_df['shipment_id'].unique()
+    # --- FILTER BY SIDEBAR STATUS ---
+    # Get the current sidebar selection
+    if len(selected_status) == 0:
+        st.info("ℹ️ No status selected in the sidebar. Please select at least one status.")
+        st.stop()
+    
+    # Get shipment IDs that match the selected status(es)
+    status_resp = supabase.table("cold_chain_tracking").select("shipment_id", "status").in_("status", selected_status).execute()
+    filtered_shipment_ids = [row['shipment_id'] for row in status_resp.data]
+    
+    if len(filtered_shipment_ids) == 0:
+        st.info(f"ℹ️ No shipments found with status(es): {', '.join(selected_status)}")
+        st.stop()
+    
+    # Filter time-series data to only include matching shipments
+    ts_df_filtered = ts_df[ts_df['shipment_id'].isin(filtered_shipment_ids)]
+    
+    if len(ts_df_filtered) == 0:
+        st.info(f"ℹ️ No time-series data found for shipments with status(es): {', '.join(selected_status)}")
+        st.stop()
+    
+    # Get unique shipment IDs from filtered data
+    shipment_ids = ts_df_filtered['shipment_id'].unique()
     
     # --- Select a Single Shipment ---
     selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
     
     # Fetch the selected shipment's curve
-    ts_selected = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
+    ts_selected = ts_df_filtered[ts_df_filtered['shipment_id'] == selected_id].sort_values('time_minutes')
     
     if len(ts_selected) == 0:
         st.warning("⚠️ No temperature data found for this shipment.")
         st.stop()
     
-    # Get the status of the selected shipment from the parent table
-    status_resp = supabase.table("cold_chain_tracking").select("status").eq("shipment_id", selected_id).execute()
-    if len(status_resp.data) == 0:
-        st.warning("⚠️ Shipment not found in the main table.")
-        st.stop()
-    shipment_status = status_resp.data[0]['status']
-    
-    # --- Build the "Average Curve" for this status ---
-    # Get all shipments with the same status from the parent table FIRST
-    status_resp_all = supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute()
-    same_status_ids = [row['shipment_id'] for row in status_resp_all.data]
-    
-    # Now filter the time-series data to only include these shipments
-    same_status_ts = ts_df[ts_df['shipment_id'].isin(same_status_ids)]
-    
-    if len(same_status_ids) < 2:
-        st.info("ℹ️ Not enough shipments with this status to build an average. Showing the selected curve only.")
-        avg_curve = None
-        std_curve = None
-    else:
-        # Calculate the average temperature at each time point
-        all_curves = []
-        valid_count = 0
-        for sid in same_status_ids[:50]:  # Limit to 50 to avoid performance issues
-            curve_df = ts_df[ts_df['shipment_id'] == sid].sort_values('time_minutes')
-            curve = curve_df['temperature'].values
-            if len(curve) == 12:  # Only use complete curves
-                all_curves.append(curve)
-                valid_count += 1
-        
-        if len(all_curves) > 0:
-            avg_curve = np.mean(all_curves, axis=0)
-            std_curve = np.std(all_curves, axis=0)
-            st.info(f"ℹ️ Built average curve from {valid_count} shipments with status '{shipment_status}'.")
-        else:
-            avg_curve = None
-            std_curve = None
-            st.info(f"ℹ️ No complete temperature curves found for status '{shipment_status}'. Showing selected curve only.")
+    # Get the status of the selected shipment
+    shipment_status = ts_selected['status'].iloc[0] if 'status' in ts_selected.columns else "Unknown"
     
     # --- Display Metrics ---
     st.subheader("📊 Quick Summary")
@@ -302,6 +287,44 @@ with tab4:
     col1.metric("📦 Shipment", selected_id)
     col2.metric("📌 Status", shipment_status.capitalize())
     col3.metric("🌡️ Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
+    
+    # --- COMPARE TO AVERAGE ---
+    st.subheader("📊 Comparison to Average")
+    
+    # Get all shipments with the same status
+    same_status_data = ts_df_filtered[ts_df_filtered['status'] == shipment_status]
+    
+    if len(same_status_data) > 0:
+        # Group by shipment_id and calculate average temp for each
+        avg_per_shipment = same_status_data.groupby('shipment_id')['temperature'].mean()
+        
+        # Calculate the average temp for this status
+        status_avg_temp = avg_per_shipment.mean()
+        status_std_temp = avg_per_shipment.std()
+        
+        # Selected shipment's average temp
+        selected_avg_temp = ts_selected['temperature'].mean()
+        
+        # Calculate how different the selected shipment is
+        temp_diff = selected_avg_temp - status_avg_temp
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"📊 Status Average ({shipment_status})", f"{status_avg_temp:.1f}°C")
+        col2.metric("📊 Your Shipment", f"{selected_avg_temp:.1f}°C")
+        
+        if temp_diff > 0:
+            col3.metric("📊 Difference", f"+{temp_diff:.1f}°C", delta="Warmer than average", delta_color="inverse")
+            st.warning(f"⚠️ This shipment is **{temp_diff:.1f}°C warmer** than the average {shipment_status} shipment.")
+        else:
+            col3.metric("📊 Difference", f"{temp_diff:.1f}°C", delta="Cooler than average", delta_color="normal")
+            st.success(f"✅ This shipment is **{abs(temp_diff):.1f}°C cooler** than the average {shipment_status} shipment.")
+        
+        # Show breach rate for this status
+        breach_count_same = same_status_data[same_status_data['temperature'] > 8.0]['shipment_id'].nunique()
+        total_same = len(avg_per_shipment)
+        if total_same > 0:
+            breach_rate = (breach_count_same / total_same) * 100
+            st.info(f"📊 **{breach_rate:.1f}%** of {shipment_status} shipments had at least one temperature breach (>{8}°C).")
     
     # --- Plot the Temperature Curve ---
     st.subheader("📈 Temperature Profile")
@@ -316,20 +339,31 @@ with tab4:
         line=dict(color='blue', width=3)
     ))
     
-    # Add the average curve (if available)
-    if avg_curve is not None and len(avg_curve) > 0:
-        times = ts_selected['time_minutes'].values
-        fig.add_trace(go.Scatter(
-            x=times, 
-            y=avg_curve, 
-            mode='lines', 
-            name=f'Average ({shipment_status})',
-            line=dict(color='orange', width=2, dash='dash')
-        ))
-        # Add shaded error band if std_curve is available
-        if std_curve is not None and len(std_curve) > 0:
+    # Add the average curve for the same status
+    if len(same_status_data) > 0:
+        # Calculate average curve
+        time_points = ts_selected['time_minutes'].values
+        all_curves = []
+        for sid in avg_per_shipment.index[:10]:  # Limit to 10 for performance
+            curve = ts_df_filtered[ts_df_filtered['shipment_id'] == sid].sort_values('time_minutes')['temperature'].values
+            if len(curve) == len(time_points):
+                all_curves.append(curve)
+        
+        if len(all_curves) > 0:
+            avg_curve = np.mean(all_curves, axis=0)
+            std_curve = np.std(all_curves, axis=0)
+            
             fig.add_trace(go.Scatter(
-                x=times.tolist() + times.tolist()[::-1],
+                x=time_points, 
+                y=avg_curve, 
+                mode='lines', 
+                name=f'Average ({shipment_status})',
+                line=dict(color='orange', width=2, dash='dash')
+            ))
+            
+            # Add shaded error band
+            fig.add_trace(go.Scatter(
+                x=time_points.tolist() + time_points.tolist()[::-1],
                 y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
                 fill='toself',
                 fillcolor='rgba(255, 165, 0, 0.2)',
@@ -337,48 +371,6 @@ with tab4:
                 name='±1 Std Dev',
                 showlegend=True
             ))
-        
-        # --- Calculate similarity metric with robust data validation ---
-        try:
-            # Get the selected curve as a list
-            selected_curve = ts_selected['temperature'].tolist()
-            avg_curve_list = avg_curve.tolist() if avg_curve is not None else []
-            
-            # --- DATA VALIDATION (FIXES THE ERROR) ---
-            # Check 1: Is the selected curve empty?
-            if len(selected_curve) == 0:
-                st.info("ℹ️ Unable to compute similarity: The selected shipment has no temperature data.")
-            # Check 2: Is the average curve empty?
-            elif len(avg_curve_list) == 0:
-                st.info("ℹ️ Unable to compute similarity: The average curve is empty.")
-            # Check 3: Do the curves have the same length?
-            elif len(selected_curve) != len(avg_curve_list):
-                st.info(f"ℹ️ Unable to compute similarity: Data length mismatch ({len(selected_curve)} vs {len(avg_curve_list)}).")
-            # Check 4: Are there any NaN or infinite values?
-            elif any(np.isnan(selected_curve)) or any(np.isnan(avg_curve_list)):
-                st.info("ℹ️ Unable to compute similarity: Invalid data (NaN values detected).")
-            else:
-                # All checks passed — compute DTW
-                distance, _ = fastdtw(selected_curve, avg_curve_list, dist=euclidean)
-                
-                # Normalize similarity (lower distance = more similar)
-                max_possible = 30
-                similarity = max(0, min(100, 100 - (distance / max_possible * 100)))
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("📊 Similarity to Average", f"{similarity:.0f}%")
-                
-                if similarity > 80:
-                    st.success(f"✅ This shipment follows the typical pattern for {shipment_status} shipments.")
-                elif similarity > 60:
-                    st.info(f"ℹ️ This shipment is moderately different from typical {shipment_status} shipments.")
-                else:
-                    st.warning(f"⚠️ This shipment is significantly different from typical {shipment_status} shipments. Investigate further.")
-                    
-        except Exception as e:
-            st.info(f"ℹ️ Unable to compute similarity metric: {str(e)}")
-    else:
-        st.info("ℹ️ No average curve available for comparison.")
     
     fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
     fig.update_layout(
