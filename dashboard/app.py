@@ -7,6 +7,7 @@ import joblib
 from pathlib import Path
 from scipy.spatial.distance import euclidean
 from fastdtw import fastdtw
+import numpy as np
 
 # 1. Page Configuration
 st.set_page_config(page_title="Logistics Dashboard", layout="wide")
@@ -241,40 +242,51 @@ with tab4:
     
     if len(ts_df) == 0:
         st.warning("⚠️ No time-series data found. Please run the temperature_stream generator first.")
-    else:
-        # Get unique shipment IDs
-        shipment_ids = ts_df['shipment_id'].unique()
+        st.stop()
+    
+    # Get unique shipment IDs
+    shipment_ids = ts_df['shipment_id'].unique()
+    
+    # --- Select Shipments to Compare ---
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
+    with col2:
+        # Ensure the second dropdown doesn't default to the same as first (use index 1 if available)
+        default_idx = 1 if len(shipment_ids) > 1 else 0
+        reference_id = st.selectbox("🔴 Compare Against (Reference)", shipment_ids, index=default_idx)
+    
+    # Fetch curves for both shipments
+    ts1 = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
+    ts2 = ts_df[ts_df['shipment_id'] == reference_id].sort_values('time_minutes')
+    
+    if len(ts1) > 0 and len(ts2) > 0:
+        temp1 = ts1['temperature'].tolist()
+        temp2 = ts2['temperature'].tolist()
         
-        # --- Select Shipments to Compare ---
-        col1, col2 = st.columns(2)
-        with col1:
-            selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
-        with col2:
-            reference_id = st.selectbox("🔴 Compare Against (Reference)", shipment_ids, index=min(1, len(shipment_ids)-1))
+        # Safety: if lists are empty, show warning
+        if len(temp1) == 0 or len(temp2) == 0:
+            st.warning("⚠️ One of the shipments has no temperature data. Please select another.")
+            st.stop()
         
-        # Fetch curves for both shipments
-        ts1 = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
-        ts2 = ts_df[ts_df['shipment_id'] == reference_id].sort_values('time_minutes')
-        
-        if len(ts1) > 0 and len(ts2) > 0:
-            temp1 = ts1['temperature'].tolist()
-            temp2 = ts2['temperature'].tolist()
-            
-            # ✅ SAFETY CHECK: Ensure both lists have data
-            if len(temp1) == 0 or len(temp2) == 0:
-                st.warning("⚠️ One of the shipments has no temperature data. Please select another.")
-                st.stop()
-            
-            # ✅ SAFETY CHECK: If identical shipments, skip DTW
-            if selected_id == reference_id:
-                st.info("ℹ️ **Identical Shipments Selected**: Both dropdowns have the same shipment. Similarity is 100%.")
-                distance = 0
-                similarity = "🟢 Very Similar (Identical)"
-                insight = "These are the same shipment. The curves and route are identical."
-            else:
+        # --- Identical shipment check ---
+        if selected_id == reference_id:
+            st.info("ℹ️ **Identical Shipments Selected**: Both dropdowns have the same shipment. Similarity is 100%.")
+            distance = 0
+            similarity = "🟢 Very Similar (Identical)"
+            insight = "These are the same shipment. The curves and route are identical."
+        else:
+            # Compute DTW with try/except to catch any errors
+            try:
                 distance, path = fastdtw(temp1, temp2, dist=euclidean)
-                
-                # Determine similarity level
+            except Exception as e:
+                st.error(f"⚠️ Error computing similarity: {e}")
+                distance = np.inf
+                similarity = "🔴 Error"
+                insight = "Unable to compute similarity. Please try different shipments."
+            
+            # Determine similarity level (only if we have a valid distance)
+            if distance != np.inf:
                 if distance < 5:
                     similarity = "🟢 Very Similar"
                     insight = "These shipments experienced nearly identical temperature patterns. If one breached, the other likely will too."
@@ -284,88 +296,88 @@ with tab4:
                 else:
                     similarity = "🔴 Very Different"
                     insight = "These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, route)."
-            
-            # --- 1. SIMPLIFIED METRICS (Manager-Friendly) ---
-            st.subheader("📊 Quick Summary")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("📊 Similarity Level", similarity)
-            col2.metric("🌡️ Avg Temp (Selected)", f"{ts1['temperature'].mean():.1f}°C")
-            col3.metric("🌡️ Avg Temp (Reference)", f"{ts2['temperature'].mean():.1f}°C")
-            
-            # --- 2. TEMPERATURE CURVES ---
-            st.subheader("📈 Temperature Profile Comparison")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=ts1['time_minutes'], 
-                y=ts1['temperature'], 
-                mode='lines+markers', 
-                name=f'{selected_id}',
-                line=dict(color='blue', width=2)
-            ))
-            fig.add_trace(go.Scatter(
-                x=ts2['time_minutes'], 
-                y=ts2['temperature'], 
-                mode='lines+markers', 
-                name=f'{reference_id}',
-                line=dict(color='red', width=2)
-            ))
-            fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
-            fig.update_layout(
-                title=f"Temperature Profile: {selected_id} vs {reference_id}",
-                xaxis_title="Time (minutes)",
-                yaxis_title="Temperature (°C)",
-                height=400,
-                hovermode='x unified'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # --- 3. GPS ROUTE MAP ---
-            st.subheader("🗺️ GPS Route (Colored by Temperature)")
-            
-            fig_map = px.scatter_mapbox(
-                ts1,
-                lat="latitude",
-                lon="longitude",
-                color="temperature",
-                hover_name="time_minutes",
-                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
-                title=f"Route for {selected_id}",
-                color_continuous_scale="RdYlBu_r",
-                zoom=6,
-                height=450
-            )
-            fig_map.update_layout(mapbox_style="open-street-map")
-            fig_map.update_traces(marker=dict(size=8))
-            st.plotly_chart(fig_map, use_container_width=True)
-            
-            # --- 4. ACTIONABLE INSIGHTS (The "So What?") ---
-            st.subheader("💡 Actionable Insights")
-            
-            # Insight 1: What does the similarity mean?
-            st.markdown(f"**{similarity}** — {insight}")
-            
-            # Insight 2: Breach detection
-            if len(ts1[ts1['temperature'] > 8.0]) > 0:
-                breach_points = ts1[ts1['temperature'] > 8.0]
-                first_breach = breach_points.iloc[0]
-                st.warning(f"""
-                ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
-                - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
-                - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
-                """)
-            else:
-                st.success("✅ No breaches detected for the selected shipment.")
-            
-            # Insight 3: What to do next
-            if selected_id == reference_id:
-                st.info("📋 **Recommendation**: No comparison needed—you selected the same shipment twice. Select a different shipment to compare.")
-            elif distance < 5:
-                st.info("📋 **Recommendation**: Both shipments followed similar patterns. If one was delayed or breached, the other is at high risk. Consider proactive inspection.")
-            elif distance < 15:
-                st.info("📋 **Recommendation**: Focus on the differences in the curves (spikes, slopes). Check if the reference shipment had better driver behavior or a different route.")
-            else:
-                st.info("📋 **Recommendation**: Investigate the root cause of the difference. Compare the GPS routes to see if one shipment took a riskier path.")
-            
+        
+        # --- 1. SIMPLIFIED METRICS (Manager-Friendly) ---
+        st.subheader("📊 Quick Summary")
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("📊 Similarity Level", similarity)
+        col2.metric("🌡️ Avg Temp (Selected)", f"{ts1['temperature'].mean():.1f}°C")
+        col3.metric("🌡️ Avg Temp (Reference)", f"{ts2['temperature'].mean():.1f}°C")
+        
+        # --- 2. TEMPERATURE CURVES ---
+        st.subheader("📈 Temperature Profile Comparison")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=ts1['time_minutes'], 
+            y=ts1['temperature'], 
+            mode='lines+markers', 
+            name=f'{selected_id}',
+            line=dict(color='blue', width=2)
+        ))
+        fig.add_trace(go.Scatter(
+            x=ts2['time_minutes'], 
+            y=ts2['temperature'], 
+            mode='lines+markers', 
+            name=f'{reference_id}',
+            line=dict(color='red', width=2)
+        ))
+        fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
+        fig.update_layout(
+            title=f"Temperature Profile: {selected_id} vs {reference_id}",
+            xaxis_title="Time (minutes)",
+            yaxis_title="Temperature (°C)",
+            height=400,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # --- 3. GPS ROUTE MAP ---
+        st.subheader("🗺️ GPS Route (Colored by Temperature)")
+        
+        fig_map = px.scatter_mapbox(
+            ts1,
+            lat="latitude",
+            lon="longitude",
+            color="temperature",
+            hover_name="time_minutes",
+            hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+            title=f"Route for {selected_id}",
+            color_continuous_scale="RdYlBu_r",
+            zoom=6,
+            height=450
+        )
+        fig_map.update_layout(mapbox_style="open-street-map")
+        fig_map.update_traces(marker=dict(size=8))
+        st.plotly_chart(fig_map, use_container_width=True)
+        
+        # --- 4. ACTIONABLE INSIGHTS (The "So What?") ---
+        st.subheader("💡 Actionable Insights")
+        
+        # Insight 1: What does the similarity mean?
+        st.markdown(f"**{similarity}** — {insight}")
+        
+        # Insight 2: Breach detection
+        if len(ts1[ts1['temperature'] > 8.0]) > 0:
+            breach_points = ts1[ts1['temperature'] > 8.0]
+            first_breach = breach_points.iloc[0]
+            st.warning(f"""
+            ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{first_breach['time_minutes']} minutes**.
+            - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
+            - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
+            """)
         else:
-            st.warning("One or both shipments have no time-series data.")
+            st.success("✅ No breaches detected for the selected shipment.")
+        
+        # Insight 3: What to do next
+        if selected_id == reference_id:
+            st.info("📋 **Recommendation**: No comparison needed—you selected the same shipment twice. Select a different shipment to compare.")
+        elif distance < 5:
+            st.info("📋 **Recommendation**: Both shipments followed similar patterns. If one was delayed or breached, the other is at high risk. Consider proactive inspection.")
+        elif distance < 15:
+            st.info("📋 **Recommendation**: Focus on the differences in the curves (spikes, slopes). Check if the reference shipment had better driver behavior or a different route.")
+        else:
+            st.info("📋 **Recommendation**: Investigate the root cause of the difference. Compare the GPS routes to see if one shipment took a riskier path.")
+        
+    else:
+        st.warning("One or both shipments have no time-series data.")
