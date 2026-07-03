@@ -223,7 +223,7 @@ with tab3:
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
 
 # =============================================
-# TAB 4: THERMAL PROFILE (Filtered by Status) - FIXED
+# TAB 4: THERMAL PROFILE (Filtered by Status) - WITH START/END MARKERS
 # =============================================
 with tab4:
     st.subheader("📈 Thermal Profile Analysis")
@@ -383,8 +383,13 @@ with tab4:
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- GPS Route Map ---
+    # --- GPS Route Map with START/END Markers ---
     st.subheader("🗺️ GPS Route (Colored by Temperature)")
+    
+    # Get first and last points for markers
+    start_point = ts_selected.iloc[0]
+    end_point = ts_selected.iloc[-1]
+    
     fig_map = px.scatter_mapbox(
         ts_selected,
         lat="latitude",
@@ -395,8 +400,31 @@ with tab4:
         title=f"Route for {selected_id}",
         color_continuous_scale="RdYlBu_r",
         zoom=6,
-        height=400
+        height=450
     )
+    
+    # Add start marker (Green)
+    fig_map.add_scattermapbox(
+        lat=[start_point['latitude']],
+        lon=[start_point['longitude']],
+        mode='markers',
+        marker=dict(size=14, color='green'),
+        text=['🟢 Start'],
+        hoverinfo='text',
+        name='Start'
+    )
+    
+    # Add end marker (Red)
+    fig_map.add_scattermapbox(
+        lat=[end_point['latitude']],
+        lon=[end_point['longitude']],
+        mode='markers',
+        marker=dict(size=14, color='red'),
+        text=['🔴 End'],
+        hoverinfo='text',
+        name='End'
+    )
+    
     fig_map.update_layout(mapbox_style="open-street-map")
     fig_map.update_traces(marker=dict(size=8))
     st.plotly_chart(fig_map, use_container_width=True)
