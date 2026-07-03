@@ -1,9 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from supabase import create_client
 import joblib
 from pathlib import Path
+from scipy.spatial.distance import euclidean
+from fastdtw import fastdtw
 
 # 1. Page Configuration
 st.set_page_config(page_title="Logistics Dashboard", layout="wide")
@@ -94,7 +97,7 @@ filtered_df = df[df['status'].isin(selected_status)]
 filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)]
 
 # 6. Tabs and Professional Layout
-tab1, tab2, tab3 = st.tabs(["📊 Overview", "📋 Raw Data", "🚀 Risk Intelligence"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📋 Raw Data", "🚀 Risk Intelligence", "📈 Thermal Profile"])
 
 with tab1:
     col1, col2, col3 = st.columns(3)
@@ -121,7 +124,7 @@ with tab2:
     )
 
 # =============================================
-# UPDATED TAB 3: WITH RISK THRESHOLD SLIDER
+# TAB 3: RISK INTELLIGENCE (WITH THRESHOLD SLIDER)
 # =============================================
 with tab3:
     st.subheader("Predictive Risk Intelligence")
@@ -223,3 +226,102 @@ with tab3:
     st.plotly_chart(fig_risk, use_container_width=True)
     
     st.info("The model analysis indicates that spatial routing characteristics (route_risk_score) are the primary drivers of cold chain breaches, providing a data-driven basis for infrastructure investment in high-risk corridors.")
+
+# =============================================
+# TAB 4: THERMAL PROFILE (Time-Series + DTW)
+# =============================================
+with tab4:
+    st.subheader("📈 Thermal Profile Analysis")
+    st.markdown("Compare temperature curves and GPS routes between shipments.")
+    
+    # Fetch time-series data
+    with st.spinner("Loading thermal profile data..."):
+        ts_response = supabase.table("temperature_stream").select("*").execute()
+        ts_df = pd.DataFrame(ts_response.data)
+    
+    if len(ts_df) == 0:
+        st.warning("⚠️ No time-series data found. Please run the temperature_stream generator first.")
+    else:
+        # Get unique shipment IDs
+        shipment_ids = ts_df['shipment_id'].unique()
+        
+        # --- Select Shipments to Compare ---
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_id = st.selectbox("Select Shipment", shipment_ids, index=0)
+        with col2:
+            reference_id = st.selectbox("Reference Shipment", shipment_ids, index=min(1, len(shipment_ids)-1))
+        
+        # Fetch curves for both shipments
+        ts1 = ts_df[ts_df['shipment_id'] == selected_id].sort_values('time_minutes')
+        ts2 = ts_df[ts_df['shipment_id'] == reference_id].sort_values('time_minutes')
+        
+        if len(ts1) > 0 and len(ts2) > 0:
+            # --- Compute DTW Distance ---
+            temp1 = ts1['temperature'].tolist()
+            temp2 = ts2['temperature'].tolist()
+            
+            distance, path = fastdtw(temp1, temp2, dist=euclidean)
+            
+            # --- Display Metrics ---
+            col1, col2, col3 = st.columns(3)
+            col1.metric("🔗 DTW Distance", round(distance, 2), help="Lower = more similar temperature patterns")
+            col2.metric("🌡️ Avg Temp (Selected)", f"{ts1['temperature'].mean():.1f}°C")
+            col3.metric("🌡️ Avg Temp (Reference)", f"{ts2['temperature'].mean():.1f}°C")
+            
+            # --- 1. Temperature Curve Plot (Root Cause Analysis) ---
+            st.subheader("📊 Temperature Curves")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=ts1['time_minutes'], 
+                y=ts1['temperature'], 
+                mode='lines+markers', 
+                name=f'{selected_id}',
+                line=dict(color='blue', width=2)
+            ))
+            fig.add_trace(go.Scatter(
+                x=ts2['time_minutes'], 
+                y=ts2['temperature'], 
+                mode='lines+markers', 
+                name=f'{reference_id}',
+                line=dict(color='red', width=2)
+            ))
+            fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="Breach Threshold (8°C)")
+            fig.update_layout(
+                title=f"Temperature Profile: {selected_id} vs {reference_id}",
+                xaxis_title="Time (minutes)",
+                yaxis_title="Temperature (°C)",
+                height=400,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # --- 2. Geospatial Map (Where did it breach?) ---
+            st.subheader("🗺️ GPS Route (Colored by Temperature)")
+            
+            fig_map = px.scatter_mapbox(
+                ts1,
+                lat="latitude",
+                lon="longitude",
+                color="temperature",
+                hover_name="time_minutes",
+                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+                title=f"Route for {selected_id}",
+                color_continuous_scale="RdYlBu_r",
+                zoom=6,
+                height=450
+            )
+            fig_map.update_layout(mapbox_style="open-street-map")
+            fig_map.update_traces(marker=dict(size=8))
+            st.plotly_chart(fig_map, use_container_width=True)
+            
+            # --- 3. Interpretation (Utility) ---
+            st.subheader("📋 Analysis Interpretation")
+            if distance < 5:
+                st.success("✅ **Similar Profiles**: These two shipments have very similar temperature patterns. The same operational factors likely influenced both.")
+            elif distance < 15:
+                st.info("ℹ️ **Moderately Similar**: These shipments share some patterns but differ in key areas. Check the route and timing for differences.")
+            else:
+                st.warning("⚠️ **Different Profiles**: These shipments experienced very different thermal conditions. Investigate the root cause (driver behavior, equipment, or route).")
+        else:
+            st.warning("One or both shipments have no time-series data.")
