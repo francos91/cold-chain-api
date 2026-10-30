@@ -20,7 +20,7 @@ def init_connection():
 
 supabase = init_connection()
 
-# 🔥 FIXED: Pagination to fetch ALL rows (no 5000 limit)
+# FIXED: Pagination to fetch ALL rows (no 5000 limit)
 @st.cache_data(ttl=600)
 def get_data():
     all_data = []
@@ -76,7 +76,7 @@ def engineer_features_for_app(df):
     df_feat['is_risk'] = (df_feat['temperature_celsius'] > 8.0).astype(int)
     
     # --- SCOR KPIs ---
-    # 1. Perfect Order Fulfillment (RL.1.1) – On‑Time + No Breach
+    # 1. Perfect Order Fulfillment (RL.1.1) – On-Time + No Breach
     df_feat['is_ontime'] = (df_feat['status'] != 'delayed').astype(int)
     df_feat['is_compliant'] = (df_feat['is_risk'] == 0).astype(int)
     df_feat['is_perfect'] = ((df_feat['is_ontime'] == 1) & (df_feat['is_compliant'] == 1)).astype(int)
@@ -103,7 +103,7 @@ def engineer_features_for_app(df):
 st.sidebar.header("Filter Options")
 
 # Force Refresh button for your cache
-if st.sidebar.button("🔄 Refresh Data"):
+if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
     st.rerun()
 
@@ -120,10 +120,10 @@ filtered_df = df[df['status'].isin(selected_status)]
 filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)]
 
 # 6. Tabs and Professional Layout
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📋 Raw Data", "🚀 Risk Intelligence", "📈 Thermal Profile"])
+tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Raw Data", "Risk Intelligence", "Thermal Profile"])
 
 with tab1:
-    st.subheader("📊 SCOR-Aligned Performance Overview")
+    st.subheader("SCOR-Aligned Performance Overview")
     
     # --- KPI Cards ---
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -134,23 +134,23 @@ with tab1:
     avg_transit = filtered_df_ready['transit_time_hours'].mean()
     avg_cost = filtered_df_ready['cost_per_shipment'].mean()
     
-    col1.metric("📦 Perfect Order Rate", f"{perfect_rate:.1f}%")
-    col2.metric("⏱️ On‑Time Delivery", f"{ontime_rate:.1f}%")
-    col3.metric("🌡️ Temp Compliance", f"{temp_compliance:.1f}%")
-    col4.metric("🚚 Avg Transit (h)", f"{avg_transit:.1f}")
-    col5.metric("💰 Avg Cost (ZAR)", f"R{avg_cost:,.0f}")
+    col1.metric("Perfect Order Rate", f"{perfect_rate:.1f}%")
+    col2.metric("On-Time Delivery", f"{ontime_rate:.1f}%")
+    col3.metric("Temp Compliance", f"{temp_compliance:.1f}%")
+    col4.metric("Avg Transit (h)", f"{avg_transit:.1f}")
+    col5.metric("Avg Cost (ZAR)", f"R{avg_cost:,.0f}")
     
     st.divider()
     
     # --- Existing Temperature Distribution (keep it) ---
-    st.subheader("🌡️ Temperature Distribution")
+    st.subheader("Temperature Distribution")
     fig = px.histogram(filtered_df, x="temperature_celsius", nbins=20, color_discrete_sequence=['#008080'])
     st.plotly_chart(fig, use_container_width=True)
     
     # --- Optional: SCOR Framework Expander ---
-    with st.expander("📘 SCOR Framework Alignment"):
+    with st.expander("SCOR Framework Alignment"):
         st.markdown("""
-        **Reliability (RL.1.1)** – Perfect Order Fulfillment (On‑Time + No Breach)  
+        **Reliability (RL.1.1)** – Perfect Order Fulfillment (On-Time + No Breach)  
         **Responsiveness (RS.1.1)** – Average Transit Time (hours)  
         **Agility (AG.1.3)** – Value at Risk (route_risk_score × impact)  
         **Cost (CO.3.15)** – Cost per Shipment (distance × ZAR/km + fixed)  
@@ -176,9 +176,9 @@ with tab2:
 with tab3:
     st.subheader("Predictive Risk Intelligence")
     
-    # --- 🎯 Risk Threshold Slider (Decision-Support Tool) ---
+    # --- Risk Threshold Slider (Decision-Support Tool) ---
     threshold = st.slider(
-        "🎯 Risk Threshold (%)",
+        "Risk Threshold (%)",
         min_value=10,
         max_value=90,
         value=50,
@@ -186,7 +186,7 @@ with tab3:
         help="Lower threshold = catches more breaches (higher recall), but may increase false alarms (lower precision)."
     ) / 100.0
     
-    st.caption(f"⚙️ Currently using a **{threshold*100:.0f}%** threshold. Shipments with a probability above this are flagged as high-risk.")
+    st.caption(f"Currently using a **{threshold*100:.0f}%** threshold. Shipments with a probability above this are flagged as high-risk.")
     
     # --- Prepare features for the model ---
     X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
@@ -197,13 +197,13 @@ with tab3:
     
     # --- Display AI-powered metrics ---
     col1, col2 = st.columns(2)
-    col1.metric("🚨 Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
-    col2.metric("🎯 Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
+    col1.metric("Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
+    col2.metric("Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
     
     st.divider()
 
-    # --- 🚨 Top 5 Highest Risk Shipments (Leaderboard) ---
-    st.markdown("### 🚨 Top 5 Highest Risk Shipments")
+    # --- Top 5 Highest Risk Shipments (Leaderboard) ---
+    st.markdown("### Top 5 Highest Risk Shipments")
     
     high_risk_df = filtered_df_ready[
         (filtered_df_ready['predicted_risk'] == 1) & 
@@ -229,17 +229,17 @@ with tab3:
         
         highest_risk = top_5_df.iloc[0]
         st.metric(
-            f"⚠️ Highest Risk: {highest_risk['shipment_id']}", 
+            f"Highest Risk: {highest_risk['shipment_id']}", 
             f"{highest_risk['risk_probability']:.1%}",
-            delta=f"{highest_risk['origin']} → {highest_risk['destination']}"
+            delta=f"{highest_risk['origin']} -> {highest_risk['destination']}"
         )
     else:
-        st.success(f"🎉 No active high-risk shipments predicted at the **{threshold*100:.0f}%** threshold!")
+        st.success(f"No active high-risk shipments predicted at the **{threshold*100:.0f}%** threshold!")
 
     st.divider()
 
-    # --- 📋 Full High-Risk Shipments List ---
-    st.markdown("### 📋 Full High-Risk Shipments List")
+    # --- Full High-Risk Shipments List ---
+    st.markdown("### Full High-Risk Shipments List")
     
     if len(high_risk_df) > 0:
         display_cols = ['shipment_id', 'origin', 'destination', 'temperature_celsius', 'status', 'risk_probability']
@@ -257,7 +257,7 @@ with tab3:
         )
         st.caption(f"Showing {len(high_risk_df)} active high-risk shipments at the **{threshold*100:.0f}%** threshold.")
     else:
-        st.success(f"🎉 No active high-risk shipments at the **{threshold*100:.0f}%** threshold!")
+        st.success(f"No active high-risk shipments at the **{threshold*100:.0f}%** threshold!")
 
     # --- High-Risk Routes Chart ---
     st.markdown("### High-Risk Routes Analysis")
@@ -273,7 +273,7 @@ with tab3:
 # TAB 4: THERMAL PROFILE (Filtered by Status) - WITH START/END MARKERS
 # =============================================
 with tab4:
-    st.subheader("📈 Thermal Profile Analysis")
+    st.subheader("Thermal Profile Analysis")
     st.markdown("View the temperature curve and GPS route for a shipment, compared to the average for its status.")
     
     # Fetch time-series data
@@ -282,12 +282,12 @@ with tab4:
         ts_df = pd.DataFrame(ts_response.data)
     
     if len(ts_df) == 0:
-        st.warning("⚠️ No time-series data found. Please run the temperature_stream generator first.")
+        st.warning("No time-series data found. Please run the temperature_stream generator first.")
         st.stop()
     
     # --- FILTER BY SIDEBAR STATUS ---
     if len(selected_status) == 0:
-        st.info("ℹ️ No status selected in the sidebar. Please select at least one status.")
+        st.info("No status selected in the sidebar. Please select at least one status.")
         st.stop()
     
     # Get shipment IDs that match the selected status(es)
@@ -295,45 +295,45 @@ with tab4:
     filtered_shipment_ids = [row['shipment_id'] for row in status_resp.data]
     
     if len(filtered_shipment_ids) == 0:
-        st.info(f"ℹ️ No shipments found with status(es): {', '.join(selected_status)}")
+        st.info(f"No shipments found with status(es): {', '.join(selected_status)}")
         st.stop()
     
     # Filter time-series data to only include matching shipments
     ts_df_filtered = ts_df[ts_df['shipment_id'].isin(filtered_shipment_ids)]
     
     if len(ts_df_filtered) == 0:
-        st.info(f"ℹ️ No time-series data found for shipments with status(es): {', '.join(selected_status)}")
+        st.info(f"No time-series data found for shipments with status(es): {', '.join(selected_status)}")
         st.stop()
     
     # Get unique shipment IDs from filtered data
     shipment_ids = ts_df_filtered['shipment_id'].unique()
     
     # --- Select a Single Shipment ---
-    selected_id = st.selectbox("🔵 Select Shipment to Analyze", shipment_ids, index=0)
+    selected_id = st.selectbox("Select Shipment to Analyze", shipment_ids, index=0)
     
-    # Fetch the selected shipment's curve
-    ts_selected = ts_df_filtered[ts_df_filtered['shipment_id'] == selected_id].sort_values('time_minutes')
+    # Fetch the selected shipment's curve (using .copy() to prevent SettingWithCopy warnings later)
+    ts_selected = ts_df_filtered[ts_df_filtered['shipment_id'] == selected_id].sort_values('time_minutes').copy()
     
     if len(ts_selected) == 0:
-        st.warning("⚠️ No temperature data found for this shipment.")
+        st.warning("No temperature data found for this shipment.")
         st.stop()
     
     # --- Get the status of the selected shipment from the parent table ---
     status_resp_single = supabase.table("cold_chain_tracking").select("status").eq("shipment_id", selected_id).execute()
     if len(status_resp_single.data) == 0:
-        st.warning("⚠️ Shipment not found in the main table.")
+        st.warning("Shipment not found in the main table.")
         st.stop()
     shipment_status = status_resp_single.data[0]['status']
     
     # --- Display Metrics ---
-    st.subheader("📊 Quick Summary")
+    st.subheader("Quick Summary")
     col1, col2, col3 = st.columns(3)
-    col1.metric("📦 Shipment", selected_id)
-    col2.metric("📌 Status", shipment_status.capitalize())
-    col3.metric("🌡️ Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
+    col1.metric("Shipment", selected_id)
+    col2.metric("Status", shipment_status.capitalize())
+    col3.metric("Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
     
     # --- COMPARE TO AVERAGE ---
-    st.subheader("📊 Comparison to Average")
+    st.subheader("Comparison to Average")
     
     # Get all shipment IDs with the same status from the parent table
     status_resp_all = supabase.table("cold_chain_tracking").select("shipment_id").eq("status", shipment_status).execute()
@@ -357,25 +357,25 @@ with tab4:
         temp_diff = selected_avg_temp - status_avg_temp
         
         col1, col2, col3 = st.columns(3)
-        col1.metric(f"📊 Status Average ({shipment_status})", f"{status_avg_temp:.1f}°C")
-        col2.metric("📊 Your Shipment", f"{selected_avg_temp:.1f}°C")
+        col1.metric(f"Status Average ({shipment_status})", f"{status_avg_temp:.1f}°C")
+        col2.metric("Your Shipment", f"{selected_avg_temp:.1f}°C")
         
         if temp_diff > 0:
-            col3.metric("📊 Difference", f"+{temp_diff:.1f}°C", delta="Warmer than average", delta_color="inverse")
-            st.warning(f"⚠️ This shipment is **{temp_diff:.1f}°C warmer** than the average {shipment_status} shipment.")
+            col3.metric("Difference", f"+{temp_diff:.1f}°C", delta="Warmer than average", delta_color="inverse")
+            st.warning(f"This shipment is **{temp_diff:.1f}°C warmer** than the average {shipment_status} shipment.")
         else:
-            col3.metric("📊 Difference", f"{temp_diff:.1f}°C", delta="Cooler than average", delta_color="normal")
-            st.success(f"✅ This shipment is **{abs(temp_diff):.1f}°C cooler** than the average {shipment_status} shipment.")
+            col3.metric("Difference", f"{temp_diff:.1f}°C", delta="Cooler than average", delta_color="normal")
+            st.success(f"This shipment is **{abs(temp_diff):.1f}°C cooler** than the average {shipment_status} shipment.")
         
         # Show breach rate for this status
         breach_count_same = same_status_data[same_status_data['temperature'] > 8.0]['shipment_id'].nunique()
         total_same = len(avg_per_shipment)
         if total_same > 0:
             breach_rate = (breach_count_same / total_same) * 100
-            st.info(f"📊 **{breach_rate:.1f}%** of {shipment_status} shipments had at least one temperature breach (>{8}°C).")
+            st.info(f"**{breach_rate:.1f}%** of {shipment_status} shipments had at least one temperature breach (>{8}°C).")
     
     # --- Plot the Temperature Curve ---
-    st.subheader("📈 Temperature Profile")
+    st.subheader("Temperature Profile")
     fig = go.Figure()
     
     # Add the selected shipment
@@ -416,11 +416,11 @@ with tab4:
                 fill='toself',
                 fillcolor='rgba(255, 165, 0, 0.2)',
                 line=dict(color='rgba(255, 255, 255, 0)'),
-                name='±1 Std Dev',
+                name='+/- 1 Std Dev',
                 showlegend=True
             ))
     
-    fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="⚠️ Breach Threshold (8°C)")
+    fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="Breach Threshold (8°C)")
     fig.update_layout(
         title=f"Temperature Profile: {selected_id} (Status: {shipment_status})",
         xaxis_title="Time (minutes)",
@@ -431,50 +431,64 @@ with tab4:
     st.plotly_chart(fig, use_container_width=True)
     
     # --- GPS Route Map with START/END Markers ---
-    st.subheader("🗺️ GPS Route (Colored by Temperature)")
+    st.subheader("GPS Route (Colored by Temperature)")
     
-    # Get first and last points for markers
-    start_point = ts_selected.iloc[0]
-    end_point = ts_selected.iloc[-1]
-    
-    fig_map = px.scatter_mapbox(
-        ts_selected,
-        lat="latitude",
-        lon="longitude",
-        color="temperature",
-        hover_name="time_minutes",
-        hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
-        title=f"Route for {selected_id}",
-        color_continuous_scale="RdYlBu_r",
-        zoom=6,
-        height=450
-    )
-    
-    # Add start marker (Green)
-    fig_map.add_scattermapbox(
-        lat=[start_point['latitude']],
-        lon=[start_point['longitude']],
-        mode='markers',
-        marker=dict(size=14, color='green'),
-        text=['🟢 Start'],
-        hoverinfo='text',
-        name='Start'
-    )
-    
-    # Add end marker (Red)
-    fig_map.add_scattermapbox(
-        lat=[end_point['latitude']],
-        lon=[end_point['longitude']],
-        mode='markers',
-        marker=dict(size=14, color='red'),
-        text=['🔴 End'],
-        hoverinfo='text',
-        name='End'
-    )
-    
-    fig_map.update_layout(mapbox_style="open-street-map")
-    fig_map.update_traces(marker=dict(size=8))
-    st.plotly_chart(fig_map, use_container_width=True)
+    # 1. FORCE NUMERIC TYPES TO PREVENT PLOTLY CRASH
+    if 'latitude' in ts_selected.columns and 'longitude' in ts_selected.columns:
+        ts_selected['latitude'] = pd.to_numeric(ts_selected['latitude'], errors='coerce')
+        ts_selected['longitude'] = pd.to_numeric(ts_selected['longitude'], errors='coerce')
+        ts_selected['temperature'] = pd.to_numeric(ts_selected['temperature'], errors='coerce')
+        
+        # 2. DROP ROWS WITH MISSING GPS DATA
+        ts_map_data = ts_selected.dropna(subset=['latitude', 'longitude', 'temperature'])
+        
+        if len(ts_map_data) > 0:
+            # Get first and last points for markers from the cleaned data
+            start_point = ts_map_data.iloc[0]
+            end_point = ts_map_data.iloc[-1]
+            
+            fig_map = px.scatter_mapbox(
+                ts_map_data,
+                lat="latitude",
+                lon="longitude",
+                color="temperature",
+                hover_name="time_minutes",
+                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+                title=f"Route for {selected_id}",
+                color_continuous_scale="RdYlBu_r",
+                zoom=6,
+                height=450
+            )
+            
+            # Add start marker (Green)
+            fig_map.add_scattermapbox(
+                lat=[start_point['latitude']],
+                lon=[start_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='green'),
+                text=['Start'],
+                hoverinfo='text',
+                name='Start'
+            )
+            
+            # Add end marker (Red)
+            fig_map.add_scattermapbox(
+                lat=[end_point['latitude']],
+                lon=[end_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='red'),
+                text=['End'],
+                hoverinfo='text',
+                name='End'
+            )
+            
+            fig_map.update_layout(mapbox_style="open-street-map")
+            fig_map.update_traces(marker=dict(size=8))
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            st.warning("Cannot plot map: No valid GPS coordinates found for this shipment.")
+    else:
+        st.error("Database Error: 'latitude' and 'longitude' columns are missing from the temperature_stream table.")
     
     # --- Breach Detection ---
     breach_df = ts_selected[ts_selected['temperature'] > 8.0]
@@ -482,9 +496,9 @@ with tab4:
         first_breach = breach_df.iloc[0]
         breach_time = first_breach['time_minutes']
         st.warning(f"""
-        ⚠️ **Breach Detected**: The selected shipment breached the 8°C threshold at **{breach_time} minutes**.
+        **Breach Detected**: The selected shipment breached the 8°C threshold at **{breach_time} minutes**.
         - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
         - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
         """)
     else:
-        st.success("✅ No breaches detected for the selected shipment.")
+        st.success("No breaches detected for the selected shipment.")
