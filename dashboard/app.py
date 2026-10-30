@@ -140,6 +140,24 @@ with tab1:
     
     st.divider()
     
+    # --- CORRIDOR PERFORMANCE BREAKDOWN (Overview Tab) ---
+    st.subheader("🇿🇦 Major Corridor Transit & Distance Analysis")
+    st.markdown("Aggregated long-haul performance across primary South African transport corridors based on live database telemetry.")
+
+    if not filtered_df_ready.empty and 'distance_km' in filtered_df_ready.columns:
+        corridor_df = filtered_df_ready.groupby(['origin', 'destination']).agg(
+            avg_transit_hours=('transit_time_hours', 'mean'),
+            avg_distance_km=('distance_km', 'mean'),
+            shipment_count=('shipment_id', 'count')
+        ).reset_index().sort_values(by='shipment_count', ascending=False).head(5)
+        
+        st.dataframe(corridor_df.style.format({
+            'avg_transit_hours': '{:.1f} hrs',
+            'avg_distance_km': '{:.1f} km'
+        }), use_container_width=True)
+    
+    st.divider()
+    
     # --- Existing Temperature Distribution (keep it) ---
     st.subheader("Temperature Distribution")
     fig = px.histogram(filtered_df, x="temperature_celsius", nbins=20, color_discrete_sequence=['#008080'])
@@ -195,7 +213,7 @@ with tab3:
     
     # --- Display AI-powered metrics ---
     col1, col2 = st.columns(2)
-    col1.metric("Predicted High-Risk Shipments", filtered_df_ready['predicted_risk'].sum())
+    col1.metric("Predicted High-Risk Shipments", int(filtered_df_ready['predicted_risk'].sum()))
     col2.metric("Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
     
     st.divider()
