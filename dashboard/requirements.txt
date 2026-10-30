@@ -1,9 +1,11 @@
 streamlit
 pandas
+numpy
 supabase
 plotly
 scikit-learn
-matplotlib
-seaborn
+joblib
 scipy
 fastdtw
+matplotlib
+seaborn
