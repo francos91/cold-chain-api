@@ -1,4 +1,4 @@
-Hree is im requiremenra do i nwed to uodate it aswell?streamlit
+streamlit
 pandas
 supabase
 plotly
