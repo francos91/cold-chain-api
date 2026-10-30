@@ -428,11 +428,15 @@ with tab4:
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- GPS Route Map with START/END Markers (USING px.scatter_map TO FIX MAPBOX ATTRIBUTE ERROR) ---
+    # --- GPS Route Map with START/END Markers (FIXED CENTERING) ---
     st.subheader("GPS Route (Colored by Temperature)")
     
     start_point = ts_selected.iloc[0]
     end_point = ts_selected.iloc[-1]
+    
+    # Calculate the exact center of this specific route so the map focuses right on it
+    center_lat = ts_selected['latitude'].mean()
+    center_lon = ts_selected['longitude'].mean()
     
     fig_map = px.scatter_map(
         ts_selected,
@@ -469,7 +473,14 @@ with tab4:
         name='End'
     )
     
-    fig_map.update_layout(map_style="open-street-map")
+    # Force the map center to the route coordinates (centered over South Africa / the path)
+    fig_map.update_layout(
+        map_style="open-street-map",
+        map=dict(
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=6
+        )
+    )
     fig_map.update_traces(marker=dict(size=8))
     st.plotly_chart(fig_map, use_container_width=True)
     
@@ -480,7 +491,7 @@ with tab4:
         breach_time = first_breach['time_minutes']
         st.warning(f"""
         **Breach Detected**: The selected shipment breached the 8°C threshold at **{breach_time} minutes**.
-        - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_gh := first_breach['longitude']:.4f}
+        - **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}
         - **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop.
         """)
     else:
