@@ -115,9 +115,9 @@ st.sidebar.write(f"Rows fetched from API: {len(df)}")
 df_ready = engineer_features_for_app(df)
 
 selected_status = st.sidebar.multiselect("Select Status", options=df['status'].unique(), default=df['status'].unique())
-filtered_df = df[df['status'].isin(selected_status)].copy()
+filtered_df = df[df['status'].isin(selected_status)]
 # Sync filtering with the processed data
-filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)].copy()
+filtered_df_ready = df_ready[df_ready['status'].isin(selected_status)]
 
 # 6. Tabs and Professional Layout
 tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Raw Data", "Risk Intelligence", "Thermal Profile"])
@@ -433,78 +433,58 @@ with tab4:
     # --- GPS Route Map with START/END Markers ---
     st.subheader("GPS Route (Colored by Temperature)")
     
+    # 1. FORCE NUMERIC TYPES TO PREVENT PLOTLY CRASH
     if 'latitude' in ts_selected.columns and 'longitude' in ts_selected.columns:
         ts_selected['latitude'] = pd.to_numeric(ts_selected['latitude'], errors='coerce')
         ts_selected['longitude'] = pd.to_numeric(ts_selected['longitude'], errors='coerce')
         ts_selected['temperature'] = pd.to_numeric(ts_selected['temperature'], errors='coerce')
         
-        ts_map_data = ts_selected.dropna(subset=['latitude', 'longitude', 'temperature']).copy()
+        # 2. DROP ROWS WITH MISSING GPS DATA
+        ts_map_data = ts_selected.dropna(subset=['latitude', 'longitude', 'temperature'])
         
         if len(ts_map_data) > 0:
-            try:
-                start_point = ts_map_data.iloc[0]
-                end_point = ts_map_data.iloc[-1]
-                
-                # Build map with go.Scattermapbox using pure Python lists to bypass Pandas/Plotly AttributeErrors
-                fig_map = go.Figure()
-
-                # 1. Main Route Trace
-                fig_map.add_trace(go.Scattermapbox(
-                    lat=ts_map_data["latitude"].tolist(),
-                    lon=ts_map_data["longitude"].tolist(),
-                    mode='markers+lines',
-                    marker=dict(
-                        size=9,
-                        color=ts_map_data["temperature"].tolist(),
-                        colorscale="RdYlBu_r",
-                        showscale=True,
-                        colorbar=dict(title="Temp (°C)")
-                    ),
-                    line=dict(width=2, color='gray'),
-                    text=[f"Time: {t} min | Temp: {temp:.1f}°C" for t, temp in zip(ts_map_data["time_minutes"], ts_map_data["temperature"])],
-                    hoverinfo='text',
-                    name='Route'
-                ))
-
-                # 2. Start Marker (Green)
-                fig_map.add_trace(go.Scattermapbox(
-                    lat=[float(start_point['latitude'])],
-                    lon=[float(start_point['longitude'])],
-                    mode='markers',
-                    marker=dict(size=14, color='green'),
-                    text=['Start'],
-                    hoverinfo='text',
-                    name='Start'
-                ))
-
-                # 3. End Marker (Red)
-                fig_map.add_trace(go.Scattermapbox(
-                    lat=[float(end_point['latitude'])],
-                    lon=[float(end_point['longitude'])],
-                    mode='markers',
-                    marker=dict(size=14, color='red'),
-                    text=['End'],
-                    hoverinfo='text',
-                    name='End'
-                ))
-
-                fig_map.update_layout(
-                    mapbox=dict(
-                        style="open-street-map",
-                        center=dict(
-                            lat=float(ts_map_data["latitude"].mean()),
-                            lon=float(ts_map_data["longitude"].mean())
-                        ),
-                        zoom=6
-                    ),
-                    title=f"Route for {selected_id}",
-                    height=450,
-                    margin=dict(l=0, r=0, t=40, b=0)
-                )
-
-                st.plotly_chart(fig_map, use_container_width=True)
-            except Exception as e:
-                st.error(f"Map rendering issue: {type(e).__name__} - {e}")
+            # Get first and last points for markers from the cleaned data
+            start_point = ts_map_data.iloc[0]
+            end_point = ts_map_data.iloc[-1]
+            
+            fig_map = px.scatter_mapbox(
+                ts_map_data,
+                lat="latitude",
+                lon="longitude",
+                color="temperature",
+                hover_name="time_minutes",
+                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+                title=f"Route for {selected_id}",
+                color_continuous_scale="RdYlBu_r",
+                zoom=6,
+                height=450
+            )
+            
+            # Add start marker (Green)
+            fig_map.add_scattermapbox(
+                lat=[start_point['latitude']],
+                lon=[start_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='green'),
+                text=['Start'],
+                hoverinfo='text',
+                name='Start'
+            )
+            
+            # Add end marker (Red)
+            fig_map.add_scattermapbox(
+                lat=[end_point['latitude']],
+                lon=[end_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='red'),
+                text=['End'],
+                hoverinfo='text',
+                name='End'
+            )
+            
+            fig_map.update_layout(mapbox_style="open-street-map")
+            fig_map.update_traces(marker=dict(size=8))
+            st.plotly_chart(fig_map, use_container_width=True)
         else:
             st.warning("Cannot plot map: No valid GPS coordinates found for this shipment.")
     else:
