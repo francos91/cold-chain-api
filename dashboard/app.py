@@ -234,9 +234,9 @@ with tab3:
     # --- Risk Threshold Slider (Decision-Support Tool with matching format) ---
     threshold_pct = st.slider(
         "Risk Threshold (%)",
-        min_value=10,
-        max_value=90,
-        value=50,
+        min_value=5,
+        max_value=95,
+        value=20,
         step=5,
         format="%d%%",
         help="Lower threshold = catches more breaches (higher recall), but may increase false alarms (lower precision)."
@@ -253,10 +253,18 @@ with tab3:
     filtered_df_ready['risk_probability'] = model.predict_proba(X_pred)[:, 1]
     filtered_df_ready['predicted_risk'] = (filtered_df_ready['risk_probability'] >= threshold).astype(int)
     
+    # --- Calculate dynamic metrics ---
+    high_risk_count = int(filtered_df_ready['predicted_risk'].sum())
+    total_count = len(filtered_df_ready)
+    high_risk_share = (high_risk_count / total_count) * 100 if total_count > 0 else 0
+    max_model_prob = filtered_df_ready['risk_probability'].max() * 100 if len(filtered_df_ready) > 0 else 0
+    
     # --- Display AI-powered metrics ---
     col1, col2 = st.columns(2)
-    col1.metric("Predicted High-Risk Shipments", int(filtered_df_ready['predicted_risk'].sum()))
-    col2.metric("Avg Risk Probability", f"{filtered_df_ready['risk_probability'].mean():.1%}")
+    col1.metric("Predicted High-Risk Shipments", high_risk_count)
+    col2.metric("High-Risk Fleet Share", f"{high_risk_share:.1f}%")
+    
+    st.caption(f"ℹ️ *Model max probability score in current view: **{max_model_prob:.1f}%**. If the threshold is set higher than this, risk count will be zero.*")
     
     st.divider()
 
