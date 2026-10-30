@@ -1,33 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import os
-import sys
 from supabase import create_client, Client
 
-app = FastAPI(title="Logistics Data Pipeline API")
+app = FastAPI(title="Logistics Data Pipeline API", version="1.1.0")
 
-# --- DEBUG BLOCK: Force Render to tell us what it sees ---
-print("🚨 DEBUG: Checking Environment Variables...")
-env_keys = list(os.environ.keys())
-
-if "SUPABASE_URL" in env_keys:
-    print("✅ SUPABASE_URL is present!")
-else:
-    print("❌ SUPABASE_URL is completely missing from Render!")
-    
-if "SUPABASE_KEY" in env_keys:
-    print("✅ SUPABASE_KEY is present!")
-else:
-    print("❌ SUPABASE_KEY is completely missing from Render!")
-sys.stdout.flush()
-# ---------------------------------------------------------
-
+# Secure environment initialization
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Critical Error: Supabase environment variables are missing!")
+    raise ValueError("Critical Error: Supabase environment variables are missing.")
 
 # Connect to the cloud database
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -38,31 +22,28 @@ class ShipmentCreate(BaseModel):
     destination: str
     temperature_celsius: float
     status: str
+    distance_km: Optional[float] = None
+    transit_time_hours: Optional[float] = None
 
 class ShipmentResponse(ShipmentCreate):
     id: int
     logged_at: str
 
-@app.get("/")
+@app.get("/", tags=["System"])
 def home():
     return {"status": "online", "message": "Logistics API Pipeline is active."}
 
-@app.post("/shipments/", response_model=List[ShipmentResponse])
+@app.post("/shipments/", response_model=List[ShipmentResponse], tags=["Shipments"])
 def create_shipment(shipment: ShipmentCreate):
     try:
-        payload = {
-            "shipment_id": shipment.shipment_id,
-            "origin": shipment.origin,
-            "destination": shipment.destination,
-            "temperature_celsius": shipment.temperature_celsius,
-            "status": shipment.status
-        }
+        # Convert Pydantic model directly to dictionary payload
+        payload = shipment.model_dump(exclude_unset=True)
         response = supabase.table("cold_chain_tracking").insert(payload).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/shipments/", response_model=List[ShipmentResponse])
+@app.get("/shipments/", response_model=List[ShipmentResponse], tags=["Shipments"])
 def get_all_shipments():
     try:
         response = supabase.table("cold_chain_tracking").select("*").execute()
