@@ -122,6 +122,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Raw Data", "Risk Intelligence", "
 
 with tab1:
     st.subheader("SCOR-Aligned Performance Overview")
+    st.caption(f"Active Status Filter: **{', '.join(selected_status)}** | Total Rows in View: **{len(filtered_df_ready):,}**")
     
     # --- KPI Cards ---
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -209,6 +210,7 @@ with tab1:
 
 with tab2:
     st.subheader("Logistics Data Table")
+    st.caption(f"Displaying rows for status: **{', '.join(selected_status)}**")
     st.dataframe(
         filtered_df,
         use_container_width=True,
@@ -226,17 +228,23 @@ with tab2:
 with tab3:
     st.subheader("Predictive Risk Intelligence")
     
-    # --- Risk Threshold Slider (Decision-Support Tool) ---
-    threshold = st.slider(
+    # --- Show active selections on screen ---
+    st.info(f"🔍 **Active View Selections** | Status Filter: `{', '.join(selected_status)}` | Total Shipments Evaluated: `{len(filtered_df_ready):,}`")
+    
+    # --- Risk Threshold Slider (Decision-Support Tool with matching format) ---
+    threshold_pct = st.slider(
         "Risk Threshold (%)",
         min_value=10,
         max_value=90,
         value=50,
         step=5,
+        format="%d%%",
         help="Lower threshold = catches more breaches (higher recall), but may increase false alarms (lower precision)."
-    ) / 100.0
+    )
     
-    st.caption(f"Currently using a **{threshold*100:.0f}%** threshold. Shipments with a probability above this are flagged as high-risk.")
+    threshold = threshold_pct / 100.0
+    
+    st.caption(f"Currently using a **{threshold_pct}%** threshold. Shipments with a probability above this are flagged as high-risk.")
     
     # --- Prepare features for the model ---
     X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
@@ -284,7 +292,7 @@ with tab3:
             delta=f"{highest_risk['origin']} -> {highest_risk['destination']}"
         )
     else:
-        st.success(f"No active high-risk shipments predicted at the **{threshold*100:.0f}%** threshold!")
+        st.success(f"No active high-risk shipments predicted at the **{threshold_pct}%** threshold!")
 
     st.divider()
 
@@ -305,9 +313,9 @@ with tab3:
                 "risk_probability": st.column_config.NumberColumn("Risk Probability", format="%.1f%%")
             }
         )
-        st.caption(f"Showing {len(high_risk_df)} active high-risk shipments at the **{threshold*100:.0f}%** threshold.")
+        st.caption(f"Showing {len(high_risk_df)} active high-risk shipments at the **{threshold_pct}%** threshold.")
     else:
-        st.success(f"No active high-risk shipments at the **{threshold*100:.0f}%** threshold!")
+        st.success(f"No active high-risk shipments at the **{threshold_pct}%** threshold!")
 
     # --- High-Risk Routes Chart ---
     st.markdown("### High-Risk Routes Analysis")
@@ -325,6 +333,7 @@ with tab3:
 with tab4:
     st.subheader("Thermal Profile Analysis")
     st.markdown("View the temperature curve and GPS route for a shipment, compared to the average for its status.")
+    st.caption(f"Active Status Filter: **{', '.join(selected_status)}**")
     
     # Fetch time-series data
     with st.spinner("Loading thermal profile data..."):
