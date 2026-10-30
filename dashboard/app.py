@@ -141,7 +141,7 @@ with tab1:
     st.divider()
     
     # --- CORRIDOR PERFORMANCE BREAKDOWN (Overview Tab) ---
-    st.subheader("🇿🇦 Major Corridor Transit & Distance Analysis")
+    st.subheader(" Major Corridor Transit & Distance Analysis")
     st.markdown("Aggregated long-haul performance across primary South African transport corridors based on live database telemetry.")
 
     if not filtered_df_ready.empty and 'distance_km' in filtered_df_ready.columns:
@@ -159,7 +159,7 @@ with tab1:
     st.divider()
 
     # --- QUICK FINANCIAL & COST-TO-SERVE ADDITION ---
-    st.subheader("💰 Cost-to-Serve & Route Financial Exposure")
+    st.subheader(" Cost-to-Serve & Route Financial Exposure")
     st.markdown("Evaluating transport cost efficiency and financial exposure (VaR) across major logistics corridors.")
     
     if not filtered_df_ready.empty:
