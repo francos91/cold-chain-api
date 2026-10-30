@@ -7,7 +7,7 @@ A technical project demonstrating an end-to-end data pipeline for monitoring col
 The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/](https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/)
 
 ## Project Overview
-This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, and temperature excursions, providing actionable insights to identify high-risk transport corridors. The system includes a **live machine learning model** that predicts temperature breach risks for individual shipments based on historical route patterns.
+This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, and temperature excursions, providing actionable insights to identify high-risk transport corridors and evaluate financial exposure (Cost-to-Serve). The system includes a **live machine learning model** that predicts temperature breach risks for individual shipments based on historical route patterns.
 
 ## System Architecture
 
@@ -19,7 +19,7 @@ The system consists of:
 - **Data Generation (Colab)**: Feeder script generates synthetic data incorporating geodesic routing and physics-based transit times.
 - **Backend (Render)**: FastAPI serves as the data ingestion layer.
 - **Database (Supabase)**: PostgreSQL stores all shipment records.
-- **Frontend Dashboard (Streamlit)**: Four tabs provide analytics, risk intelligence, corridor breakdowns, and thermal profiling.
+- **Frontend Dashboard (Streamlit)**: Four tabs provide analytics, risk intelligence, corridor breakdowns, Cost-to-Serve financials, and thermal profiling.
 - **ML Models**: Random Forest model (`advanced_model.pkl`) and label encoder (`le_route.pkl`) are loaded directly into the dashboard for real-time predictions.
 
 ### Technical Architecture
@@ -30,6 +30,7 @@ The system consists of:
 - **Model Deployment**: Serialized model and encoder (`joblib`) stored in GitHub and loaded into the Streamlit dashboard at runtime, ensuring consistency between training and production environments.
 
 ### Repository Structure
+```
 cold-chain-logistics/
 ├── main/
 │   └── main.py              # FastAPI backend (Render deployment)
@@ -42,6 +43,7 @@ cold-chain-logistics/
 │   └── lade_features.pkl    # Feature order for delay predictor
 ├── requirements.txt         # Python dependencies
 └── README.md                # This file
+```
 
 ## Key Features
 - **Predictive Risk Intelligence**: Employs a Random Forest classifier (trained on historical route data) to predict temperature excursion risks in real-time. The model identifies high-risk corridors and provides per-shipment risk probabilities, enabling proactive intervention before breaches occur.
@@ -50,6 +52,7 @@ cold-chain-logistics/
 - **Actionable Risk Filtering**: The high-risk shipments list automatically excludes already-delivered shipments, focusing only on active shipments where intervention is still possible.
 - **Thermal Profile & GPS Route Analysis**: Select any shipment to view its temperature curve, compare it against the average for its status (delivered, delayed, in-transit, or at‑warehouse), and visualize the GPS route colored by temperature with start/end markers. This enables root‑cause analysis.
 - **Major Corridor Transit & Distance Analysis**: An executive-level data table on the Overview tab aggregating long-haul performance across primary South African transport corridors (e.g., Johannesburg-Durban, Cape Town-George) with shipment counts, average distances, and realistic transit durations.
+- **Cost-to-Serve & Route Financial Exposure**: Financial modeling on the Overview tab evaluating transport cost efficiency (distance × R18/km + R200 fixed cost) alongside cost-vs-distance physics scatter plots, addressing SCOR cost metrics.
 - **Live Machine Learning Integration**: The trained model and encoder are serialized using `joblib` and deployed directly within the Streamlit dashboard, delivering on-demand risk predictions for filtered datasets.
 - **Interactive Filtering & Analytics**: Real-time dashboard filtering by shipment status, with dynamic updates to both historical metrics and AI-powered risk predictions.
 - **Scalable Data Pipeline**: Secure data ingestion via a FastAPI backend (deployed on Render), with Supabase (PostgreSQL) as the cloud data store.
