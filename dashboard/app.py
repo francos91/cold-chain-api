@@ -157,6 +157,40 @@ with tab1:
         }), use_container_width=True)
     
     st.divider()
+
+    # --- QUICK FINANCIAL & COST-TO-SERVE ADDITION ---
+    st.subheader("💰 Cost-to-Serve & Route Financial Exposure")
+    st.markdown("Evaluating transport cost efficiency and financial exposure (VaR) across major logistics corridors.")
+    
+    if not filtered_df_ready.empty:
+        cost_df = filtered_df_ready.groupby(['origin', 'destination']).agg(
+            avg_cost_zar=('cost_per_shipment', 'mean'),
+            total_shipments=('shipment_id', 'count'),
+            avg_transit_h=('transit_time_hours', 'mean')
+        ).reset_index().sort_values(by='avg_cost_zar', ascending=False).head(5)
+        
+        col_a, col_b = st.columns(2)
+        
+        with col_a:
+            st.markdown("**Top 5 Highest Cost Corridors (Avg ZAR)**")
+            st.dataframe(cost_df.style.format({
+                'avg_cost_zar': 'R{:,.2f}',
+                'avg_transit_h': '{:.1f} hrs'
+            }), use_container_width=True)
+            
+        with col_b:
+            fig_cost = px.scatter(
+                filtered_df_ready.head(500), 
+                x="distance_km", 
+                y="cost_per_shipment",
+                color="status",
+                title="Shipment Cost vs. Distance Physics",
+                labels={"distance_km": "Distance (km)", "cost_per_shipment": "Cost (ZAR)"},
+                color_discrete_map={"delivered": "#008080", "delayed": "#FF4B4B", "in-transit": "#FFA500"}
+            )
+            st.plotly_chart(fig_cost, use_container_width=True)
+    
+    st.divider()
     
     # --- Existing Temperature Distribution (keep it) ---
     st.subheader("Temperature Distribution")
