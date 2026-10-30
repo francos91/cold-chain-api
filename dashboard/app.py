@@ -85,13 +85,13 @@ def engineer_features_for_app(df):
     # (No new column needed; it's already in df_feat)
     
     # 3. Cost per Shipment (CO.3.15) – using distance_km
-    cost_per_km = 18  # rand/km (typical heavy vehicle)
-    fixed_cost = 200  # rand per shipment
+    cost_per_km = 18  # ZAR/km (typical heavy vehicle)
+    fixed_cost = 200  # ZAR per shipment
     # distance_km is already in the data (populated earlier)
     df_feat['cost_per_shipment'] = (df_feat['distance_km'] * cost_per_km) + fixed_cost
     
     # 4. Value at Risk (AG.1.3) – route_risk_score × impact
-    impact_per_breach = 50000  # rand (estimated loss)
+    impact_per_breach = 50000  # ZAR (estimated loss)
     df_feat['vaR_ZAR'] = df_feat['route_risk_score'] * impact_per_breach
     
     # 5. Capacity Utilization (AM.3.9) – simulate (no real load data)
@@ -153,7 +153,7 @@ with tab1:
         **Reliability (RL.1.1)** – Perfect Order Fulfillment (On-Time + No Breach)  
         **Responsiveness (RS.1.1)** – Average Transit Time (hours)  
         **Agility (AG.1.3)** – Value at Risk (route_risk_score × impact)  
-        **Cost (CO.3.15)** – Cost per Shipment (distance × rand/km + fixed)  
+        **Cost (CO.3.15)** – Cost per Shipment (distance × ZAR/km + fixed)  
         **Asset Management (AM.3.9)** – Capacity Utilization (simulated)  
         """)
 
@@ -311,8 +311,8 @@ with tab4:
     # --- Select a Single Shipment ---
     selected_id = st.selectbox("Select Shipment to Analyze", shipment_ids, index=0)
     
-    # Fetch the selected shipment's curve
-    ts_selected = ts_df_filtered[ts_df_filtered['shipment_id'] == selected_id].sort_values('time_minutes')
+    # Fetch the selected shipment's curve (using .copy() to prevent SettingWithCopy warnings later)
+    ts_selected = ts_df_filtered[ts_df_filtered['shipment_id'] == selected_id].sort_values('time_minutes').copy()
     
     if len(ts_selected) == 0:
         st.warning("No temperature data found for this shipment.")
@@ -433,48 +433,62 @@ with tab4:
     # --- GPS Route Map with START/END Markers ---
     st.subheader("GPS Route (Colored by Temperature)")
     
-    # Get first and last points for markers
-    start_point = ts_selected.iloc[0]
-    end_point = ts_selected.iloc[-1]
-    
-    fig_map = px.scatter_mapbox(
-        ts_selected,
-        lat="latitude",
-        lon="longitude",
-        color="temperature",
-        hover_name="time_minutes",
-        hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
-        title=f"Route for {selected_id}",
-        color_continuous_scale="RdYlBu_r",
-        zoom=6,
-        height=450
-    )
-    
-    # Add start marker (Green)
-    fig_map.add_scattermapbox(
-        lat=[start_point['latitude']],
-        lon=[start_point['longitude']],
-        mode='markers',
-        marker=dict(size=14, color='green'),
-        text=['Start'],
-        hoverinfo='text',
-        name='Start'
-    )
-    
-    # Add end marker (Red)
-    fig_map.add_scattermapbox(
-        lat=[end_point['latitude']],
-        lon=[end_point['longitude']],
-        mode='markers',
-        marker=dict(size=14, color='red'),
-        text=['End'],
-        hoverinfo='text',
-        name='End'
-    )
-    
-    fig_map.update_layout(mapbox_style="open-street-map")
-    fig_map.update_traces(marker=dict(size=8))
-    st.plotly_chart(fig_map, use_container_width=True)
+    # 1. FORCE NUMERIC TYPES TO PREVENT PLOTLY CRASH
+    if 'latitude' in ts_selected.columns and 'longitude' in ts_selected.columns:
+        ts_selected['latitude'] = pd.to_numeric(ts_selected['latitude'], errors='coerce')
+        ts_selected['longitude'] = pd.to_numeric(ts_selected['longitude'], errors='coerce')
+        ts_selected['temperature'] = pd.to_numeric(ts_selected['temperature'], errors='coerce')
+        
+        # 2. DROP ROWS WITH MISSING GPS DATA
+        ts_map_data = ts_selected.dropna(subset=['latitude', 'longitude', 'temperature'])
+        
+        if len(ts_map_data) > 0:
+            # Get first and last points for markers from the cleaned data
+            start_point = ts_map_data.iloc[0]
+            end_point = ts_map_data.iloc[-1]
+            
+            fig_map = px.scatter_mapbox(
+                ts_map_data,
+                lat="latitude",
+                lon="longitude",
+                color="temperature",
+                hover_name="time_minutes",
+                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+                title=f"Route for {selected_id}",
+                color_continuous_scale="RdYlBu_r",
+                zoom=6,
+                height=450
+            )
+            
+            # Add start marker (Green)
+            fig_map.add_scattermapbox(
+                lat=[start_point['latitude']],
+                lon=[start_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='green'),
+                text=['Start'],
+                hoverinfo='text',
+                name='Start'
+            )
+            
+            # Add end marker (Red)
+            fig_map.add_scattermapbox(
+                lat=[end_point['latitude']],
+                lon=[end_point['longitude']],
+                mode='markers',
+                marker=dict(size=14, color='red'),
+                text=['End'],
+                hoverinfo='text',
+                name='End'
+            )
+            
+            fig_map.update_layout(mapbox_style="open-street-map")
+            fig_map.update_traces(marker=dict(size=8))
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            st.warning("Cannot plot map: No valid GPS coordinates found for this shipment.")
+    else:
+        st.error("Database Error: 'latitude' and 'longitude' columns are missing from the temperature_stream table.")
     
     # --- Breach Detection ---
     breach_df = ts_selected[ts_selected['temperature'] > 8.0]
