@@ -98,7 +98,7 @@ The synthetic dataset was generated using statistical parameters extracted from 
 | Category | Count | Source / Generator |
 | :--- | :--- | :--- |
 | **Total Master Records** | **4,500** | Simulated via LaDe + Physics Engine (Active in Supabase `cold_chain_tracking`) |
-| **Time-Series Telemetry** | **>150,000** | Simulated via OSRM GPS mapping (Active in Supabase `temperature_stream`) |
+| **Time-Series Telemetry** | **66,000** | Simulated via OSRM GPS mapping (Active in Supabase `temperature_stream`) |
 
 ## Future Roadmap
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
