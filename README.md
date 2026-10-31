@@ -102,7 +102,7 @@ South Africa-Specific Literature Sources:
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
 - [ ] Extend the Random Forest model with XGBoost or LightGBM to improve prediction accuracy.
-- [ ] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
+- [x] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets (Master's Research Proposal core objective).
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
