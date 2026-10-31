@@ -1,10 +1,11 @@
 # Cold Chain Logistics Transport Intelligence Dashboard
+[![Cold Chain Logistics CI/CD](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml/badge.svg)](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml)
 
 A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
 
 ## Live Demo
 
-The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/](https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/)
+The dashboard is deployed at: https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/
 
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
@@ -12,77 +13,88 @@ This pipeline was developed to address the challenge of real-time logistics moni
 ## System Architecture
 
 ### Technical Architecture
-- **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to securely ingest telemetry data in real-time.
-- **Dual-Table Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database utilizing a relational dual-table structure:
-  - `cold_chain_tracking`: The master table storing shipment records, statuses, distances, transit hours, and dynamic cargo weights.
-  - `temperature_stream`: A time-series table storing high-frequency OSRM-generated GPS coordinates and thermodynamic temperature fluctuations.
-- **Frontend Dashboard (Streamlit Cloud)**: A multi-tab control tower that processes live data, identifies temperature excursions, quantifies carbon emissions, and visualizes route risk scores. 
-- **Thermal Profile & GPS Analysis**: A dedicated tab allowing users to visualize a shipment's temperature curve against the status average, complete with an interactive GPS route map colored by temperature and start/end geographic markers.
+- Data Ingestion (Backend): A FastAPI service deployed on Render, handling REST API requests to securely ingest telemetry data in real-time.
+- Dual-Table Data Storage: Supabase (PostgreSQL) serves as the primary cloud database utilizing a relational dual-table structure:
+  - cold_chain_tracking: The master table storing shipment records, statuses, distances, transit hours, and dynamic cargo weights.
+  - temperature_stream: A time-series table storing high-frequency OSRM-generated GPS coordinates and thermodynamic temperature fluctuations.
+- Frontend Dashboard (Streamlit Cloud): A multi-tab control tower that processes live data, identifies temperature excursions, quantifies carbon emissions, and visualizes route risk scores. 
+- Thermal Profile & GPS Analysis: A dedicated tab allowing users to visualize a shipment's temperature curve against the status average, complete with an interactive GPS route map colored by temperature and start/end geographic markers.
 
 ## Two-Stage Machine Learning Architecture
 
 This project utilizes a two-stage machine learning pipeline, separating the generation of realistic synthetic telemetry from the real-time operational dashboard.
 
-### 1. Environmental Simulation Engine (`lade_delay_model.pkl`)
+### 1. Environmental Simulation Engine (lade_delay_model.pkl)
 Because real-world cold chain telemetry is highly proprietary, this project requires a physics-based synthetic data generator. To ensure the generated data reflects real-world supply chain bottlenecks rather than random noise, the data feeder pipeline utilizes a dedicated ML model.
-- **Training Data:** Trained on the Cainiao-AI/LaDe dataset (a massive real-world last-mile delivery dataset).
-- **Function:** Predicts the probability of a shipment delay based on temporal and regional features (Time of Day, Day of Week, Area of Interest Type).
-- **Role in Pipeline:** This model acts as the "Simulator." During the data generation phase, the Python script asked this model to predict whether each of the 4,500 simulated shipments would be delayed. If a delay was predicted, the physics engine applied a thermodynamic temperature rise. The final payload was then pushed to the FastAPI backend.
+- Training Data: Trained on the Cainiao-AI/LaDe dataset (a massive real-world last-mile delivery dataset).
+- Function: Predicts the probability of a shipment delay based on temporal and regional features (Time of Day, Day of Week, Area of Interest Type).
+- Role in Pipeline: This model acts as the "Simulator." During the data generation phase, the Python script asked this model to predict whether each of the 4,500 simulated shipments would be delayed. If a delay was predicted, the physics engine applied a thermodynamic temperature rise. The final payload was then pushed to the FastAPI backend.
 
-### 2. Real-Time Risk Intelligence (`advanced_model.pkl`)
+### 2. Real-Time Risk Intelligence (advanced_model.pkl)
 This is the core predictive model operating inside the Streamlit Control Tower. It evaluates the telemetry data sitting in the Supabase PostgreSQL database to flag high-risk shipments before a temperature excursion occurs.
-- **Training Data:** Trained on the causal physics-based telemetry generated by the simulation engine, encompassing spatial routing, distances, transit times, and delay statuses.
-- **Function:** A 5-feature Random Forest Classifier that predicts the continuous probability of a Cold Chain Breach (Temperature > 8C).
-- **Role in Pipeline:** Loaded directly into `app.py`. It powers the dynamic Risk Threshold Slider, allowing operations managers to identify and intercept high-risk fleet assets based on their continuous probability scores.
+- Training Data: Trained on the causal physics-based telemetry generated by the simulation engine, encompassing spatial routing, distances, transit times, and delay statuses.
+- Function: A 5-feature Random Forest Classifier that predicts the continuous probability of a Cold Chain Breach (Temperature > 8C).
+- Role in Pipeline: Loaded directly into app.py. It powers the dynamic Risk Threshold Slider, allowing operations managers to identify and intercept high-risk fleet assets based on their continuous probability scores.
 
 ## Repository Structure
 cold-chain-logistics/
+├── .github/
+│   └── workflows/
+│       └── ci.yml           # GitHub Actions CI/CD pipeline
 ├── main/
 │   └── main.py              # FastAPI backend (Render deployment)
 ├── dashboard/
 │   ├── app.py               # Streamlit frontend (Control Tower)
 │   ├── advanced_model.pkl   # Production 5-Feature Random Forest model
 │   └── le_route.pkl         # Label encoder for route mapping
+├── tests/                   # Pytest automated testing suite
+│   ├── test_physics.py
+│   ├── test_thermal.py
+│   └── test_ml_model.py
 ├── research/                # Data generation & simulation scratchpads
 │   ├── lade_delay_model.pkl # LaDe-trained delay predictor (Simulation only)
 │   └── lade_features.pkl    # Feature order for delay predictor
 ├── requirements.txt         # Python dependencies
 └── README.md                # This file
 
+## 🧪 Testing & CI/CD Pipeline
+This repository implements rigorous software engineering practices tailored for industrial logistics systems:
+* Automated CI/CD: Powered by GitHub Actions (.github/workflows/ci.yml), running code style linting (flake8) and unit tests automatically on every push.
+* Unit Test Suite (tests/): 
+  * ISO 14083 carbon accounting and tax liability verification.
+  * Thermal excursion boundary logic for perishable cargo safety.
+  * Feature shape validation for predictive machine learning risk models.
+
 ## Key Features
-- **Continuous Predictive Risk Intelligence**: By engineering continuous physical constraints (`distance_km` and `transit_time_hours`) into the feature space alongside categorical route data, the Random Forest model's probability distribution is smoothed. This allows for highly granular, dynamic thresholding.
-- **Dynamic Risk Threshold Slider**: An interactive decision-support tool (5% – 95%) that allows logistics managers to adjust their operational risk tolerance. 
-- **Actionable High-Risk Leaderboard**: Displays the highest-risk active shipments sorted by probability score. Automatically excludes already-delivered shipments, focusing operations managers strictly on active fleet assets where intervention is still possible.
-- **Major Corridor Transit & Distance Analysis**: An executive-level data table aggregating long-haul performance across primary South African transport corridors (e.g., Johannesburg-Durban) with shipment counts, average distances, and realistic transit durations.
-- **Cost-to-Serve & Route Financial Exposure**: Financial modeling evaluating transport cost efficiency (distance x R18/km + R200 fixed cost) alongside cost-vs-distance physics scatter plots.
-- **Carbon Emissions & Tax Calculator**: ISO 14083 / GLEC-compliant activity-based carbon accounting module that calculates tonne-kilometers (tkm) using individual shipment payload masses. Compares diesel baselines against electric vehicle fleets and highlights the carbon tax financial liability (R462 per tonne of CO2) under South African grid realities.
+- Continuous Predictive Risk Intelligence: By engineering continuous physical constraints (distance_km and transit_time_hours) into the feature space alongside categorical route data, the Random Forest model's probability distribution is smoothed. This allows for highly granular, dynamic thresholding.
+- Dynamic Risk Threshold Slider: An interactive decision-support tool (5% – 95%) that allows logistics managers to adjust their operational risk tolerance. 
+- Actionable High-Risk Leaderboard: Displays the highest-risk active shipments sorted by probability score. Automatically excludes already-delivered shipments, focusing operations managers strictly on active fleet assets where intervention is still possible.
+- Major Corridor Transit & Distance Analysis: An executive-level data table aggregating long-haul performance across primary South African transport corridors (e.g., Johannesburg-Durban) with shipment counts, average distances, and realistic transit durations.
+- Cost-to-Serve & Route Financial Exposure: Financial modeling evaluating transport cost efficiency (distance x R18/km + R200 fixed cost) alongside cost-vs-distance physics scatter plots.
+- Carbon Emissions & Tax Calculator: ISO 14083 / GLEC-compliant activity-based carbon accounting module that calculates tonne-kilometers (tkm) using individual shipment payload masses. Compares diesel baselines against electric vehicle fleets and highlights the carbon tax financial liability (R462 per tonne of CO2) under South African grid realities.
 
 ## SCOR-Aligned Performance KPIs
 The Overview tab features a set of SCOR (Supply Chain Operations Reference) aligned KPIs, providing a professional, industry-standard view of supply chain performance:
 
-| KPI | SCOR Attribute | Description |
-| :--- | :--- | :--- |
-| **Perfect Order Rate** | Reliability (RL.1.1) | Percentage of shipments delivered on‑time and without temperature breach. |
-| **On‑Time Delivery** | Reliability (RL.2.2) | Percentage of shipments that are not delayed. |
-| **Temperature Compliance** | Reliability (RL.2.4) | Percentage of shipments maintained within the 8C safety threshold. |
-| **Average Transit Time** | Responsiveness (RS.1.1) | The average journey time (hours) per shipment, derived from route distance and heavy-vehicle speeds. |
-| **Cost per Shipment** | Cost (CO.3.15) | Estimated cost per shipment based on distance (R18/km + fixed handling cost). |
+* Perfect Order Rate: Percentage of shipments delivered on-time and without temperature breach.
+* On-Time Delivery: Percentage of shipments that are not delayed.
+* Temperature Compliance: Percentage of shipments maintained within the 8C safety threshold.
+* Average Transit Time: The average journey time (hours) per shipment, derived from route distance and heavy-vehicle speeds.
+* Cost per Shipment: Estimated cost per shipment based on distance (R18/km + fixed handling cost).
 
-Value at Risk (VaR), Carbon Tax Exposure, and Capacity Utilization are also calculated in the background to support Agility (AG.1.3), Cost (CO.3.15), and Asset Management (AM.3.9) metrics.
+Value at Risk (VaR), Carbon Tax Exposure, and Capacity Utilization are also calculated in the background to support Agility, Cost, and Asset Management metrics.
 
 ## Synthetic Data Generator & Physics Modeling
 The synthetic dataset was generated using statistical parameters extracted from academic literature on South African cold chain logistics, combined with the OSRM (Open Source Routing Machine) API for realistic geodesic routing physics:
 
-| Parameter | Literature Value / Logic | Implementation |
-| :--- | :--- | :--- |
-| Route Distances | Geodesic (Great Circle) * 1.25 road factor | Calculated across 10 major SA cities via OSRM |
-| Transit Times | Distance / 65 km/h + dock/traffic buffers | Scaled to heavy-vehicle speeds (~12 to 35+ hours) |
-| Cargo Weights | Normal distribution (12 to 30 tonnes) | Seeded dynamically per shipment in Supabase for ISO 14083 tkm |
-| Mean Temperature | 0.5C – 4.5C | Base mean of 0.5C (grape export studies) |
-| Delay Prediction | Cainiao-AI/LaDe dataset patterns | Applied via simulated environmental model (`lade_delay_model.pkl`) |
-| Delay Temperature Rise | +2C to +5C | Applied to delayed shipments |
-| Altitude Penalty | ~21% cooling loss | Applied to Johannesburg/Highveld routes |
-| Summer Heat Load | +2C to +5C | Applied probabilistically to 40% of shipments |
+* Route Distances: Geodesic (Great Circle) * 1.25 road factor via OSRM.
+* Transit Times: Distance / 65 km/h + dock/traffic buffers.
+* Cargo Weights: Normal distribution (12 to 30 tonnes).
+* Mean Temperature: 0.5C – 4.5C based on grape export studies.
+* Delay Prediction: Cainiao-AI/LaDe dataset patterns applied via lade_delay_model.pkl.
+* Delay Temperature Rise: +2C to +5C applied to delayed shipments.
+* Altitude Penalty: ~21% cooling loss on Highveld routes.
+* Summer Heat Load: +2C to +5C probabilistically applied to 40% of shipments.
 
 South Africa-Specific Literature Sources:
 - Grape export reefer studies (Cape Town → Rotterdam)
@@ -91,18 +103,17 @@ South Africa-Specific Literature Sources:
 - Refrigeration performance at Johannesburg altitude (1,750m)
 
 ## Dataset Statistics
-| Category | Count | Source / Generator |
-| :--- | :--- | :--- |
-| **Total Master Records** | **4,500** | Simulated via LaDe + Physics Engine (Active in Supabase `cold_chain_tracking`) |
-| **Time-Series Telemetry** | **66,000** | Simulated via OSRM GPS mapping (Active in Supabase `temperature_stream`) |
+* Total Master Records: 4,500 (Simulated via LaDe + Physics Engine)
+* Time-Series Telemetry: 66,000 (Simulated via OSRM GPS mapping)
 
 ## Future Roadmap & Completed Phases
+- [x] Implement automated CI/CD pipeline and unit testing suite using GitHub Actions and pytest.
 - [x] Integrate Carbon emissions per trip/route and carbon tax financial exposure modeling.
+- [x] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
 - [ ] Extend the Random Forest model with XGBoost or LightGBM to improve prediction accuracy.
-- [x] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets (Master's Research Proposal core objective).
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
