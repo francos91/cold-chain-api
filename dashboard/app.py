@@ -52,7 +52,7 @@ def load_advanced_model():
 
 model, le_route = load_advanced_model()
 
-# 4. Helper: Feature Engineering for Predictive Analytics (UPDATED for Model)
+# 4. Helper: Feature Engineering for Predictive Analytics (UPDATED for Smooth Variance)
 def engineer_features_for_app(df):
     df_feat = df.copy()
     df_feat['route'] = df_feat['origin'] + "_to_" + df_feat['destination']
@@ -75,13 +75,24 @@ def engineer_features_for_app(df):
     # Add status indicator (for your existing charts)
     df_feat['is_risk'] = (df_feat['temperature_celsius'] > 8.0).astype(int)
     
+    # --- CONTINUOUS PHYSICS FEATURES (The Fix for Smooth Slider Variance) ---
+    df_feat['distance_km'] = pd.to_numeric(df_feat.get('distance_km', 500), errors='coerce').fillna(500)
+    
+    # Generate stable transit times for smooth variance if missing
+    if 'transit_time_hours' not in df_feat.columns or df_feat['transit_time_hours'].isnull().all():
+        np.random.seed(42)
+        base_transit = df_feat['distance_km'] / 65.0
+        delay_penalty = df_feat['is_delayed'] * np.random.uniform(4, 12, len(df_feat))
+        traffic_noise = np.random.uniform(-1, 2, len(df_feat))
+        df_feat['transit_time_hours'] = base_transit + delay_penalty + traffic_noise
+    else:
+        df_feat['transit_time_hours'] = pd.to_numeric(df_feat['transit_time_hours'], errors='coerce')
+    
     # --- SCOR KPIs ---
     # 1. Perfect Order Fulfillment (RL.1.1) - On-Time + No Breach
     df_feat['is_ontime'] = (df_feat['status'] != 'delayed').astype(int)
     df_feat['is_compliant'] = (df_feat['is_risk'] == 0).astype(int)
     df_feat['is_perfect'] = ((df_feat['is_ontime'] == 1) & (df_feat['is_compliant'] == 1)).astype(int)
-    
-    # 2. Responsiveness (RS.1.1) - transit_time_hours is already in the data
     
     # 3. Cost per Shipment (CO.3.15) - using distance_km
     cost_per_km = 18  # rand/km (typical heavy vehicle)
@@ -246,8 +257,8 @@ with tab3:
     
     st.caption(f"Currently using a **{threshold_pct}%** threshold. Shipments with a probability above this are flagged as high-risk.")
     
-    # --- Prepare features for the model ---
-    X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed']]
+    # --- Prepare features for the 5-FEATURE model ---
+    X_pred = filtered_df_ready[['route_enc', 'route_risk_score', 'is_delayed', 'distance_km', 'transit_time_hours']]
     
     # --- Get probabilities ---
     filtered_df_ready['risk_probability'] = model.predict_proba(X_pred)[:, 1]
