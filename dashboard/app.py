@@ -77,6 +77,7 @@ def engineer_features_for_app(df):
     
     # --- CONTINUOUS PHYSICS FEATURES (The Fix for Smooth Slider Variance) ---
     df_feat['distance_km'] = pd.to_numeric(df_feat.get('distance_km', 500), errors='coerce').fillna(500)
+    df_feat['weight_tonnes'] = pd.to_numeric(df_feat.get('weight_tonnes', 20.0), errors='coerce').fillna(20.0)
     
     # Generate stable transit times for smooth variance if missing
     if 'transit_time_hours' not in df_feat.columns or df_feat['transit_time_hours'].isnull().all():
@@ -153,7 +154,7 @@ with tab1:
     st.divider()
     
     # --- CORRIDOR PERFORMANCE BREAKDOWN (Overview Tab) ---
-    st.subheader(" Major Corridor Transit & Distance Analysis")
+    st.subheader("Major Corridor Transit & Distance Analysis")
     st.markdown("Aggregated long-haul performance across primary South African transport corridors based on live database telemetry.")
 
     if not filtered_df_ready.empty and 'distance_km' in filtered_df_ready.columns:
@@ -171,7 +172,7 @@ with tab1:
     st.divider()
 
     # --- QUICK FINANCIAL & COST-TO-SERVE ADDITION ---
-    st.subheader(" Cost-to-Serve & Route Financial Exposure")
+    st.subheader("Cost-to-Serve & Route Financial Exposure")
     st.markdown("Evaluating transport cost efficiency and financial exposure (VaR) across major logistics corridors.")
     
     if not filtered_df_ready.empty:
@@ -202,6 +203,59 @@ with tab1:
             )
             st.plotly_chart(fig_cost, use_container_width=True)
     
+    # --- PHASE 1: CARBON EMISSIONS & FINANCIAL TAX CALCULATOR (DYNAMIC) ---
+    st.divider()
+    st.subheader("Carbon Emissions & Financial Exposure (SCOR Cost-to-Serve)")
+    st.markdown("Quantifying environmental impact and carbon tax liability using ISO 14083 activity-based modelling.")
+
+    DIESEL_EMISSION_FACTOR = 73.2  # g CO2e/tkm[span_0](start_span)[span_0](end_span)
+    GRID_BEV_EMISSION_FACTOR = 156.8  # g CO2e/tkm[span_1](start_span)[span_1](end_span)
+    SOLAR_BEV_EMISSION_FACTOR = 6.4  # g CO2e/tkm[span_2](start_span)[span_2](end_span)
+    CARBON_TAX_RATE = 462  # ZAR per tonne of CO2[span_3](start_span)[span_3](end_span)
+
+    if not filtered_df_ready.empty and 'distance_km' in filtered_df_ready.columns and 'weight_tonnes' in filtered_df_ready.columns:
+        # Calculate dynamic Tonne-Kilometers (mass x distance)
+        filtered_df_ready['tkm'] = filtered_df_ready['distance_km'] * filtered_df_ready['weight_tonnes']
+        total_tkm = filtered_df_ready['tkm'].sum()
+
+        # Calculate Emissions (in Tonnes of CO2)
+        diesel_emissions = (total_tkm * DIESEL_EMISSION_FACTOR) / 1_000_000
+        grid_bev_emissions = (total_tkm * GRID_BEV_EMISSION_FACTOR) / 1_000_000
+        solar_bev_emissions = (total_tkm * SOLAR_BEV_EMISSION_FACTOR) / 1_000_000
+
+        # Calculate Financial Carbon Tax Exposure
+        tax_diesel = diesel_emissions * CARBON_TAX_RATE
+        tax_grid = grid_bev_emissions * CARBON_TAX_RATE
+        tax_solar = solar_bev_emissions * CARBON_TAX_RATE
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                label="Current Fleet (Diesel Baseline)", 
+                value=f"{diesel_emissions:,.2f} tCO2", 
+                delta=f"R {tax_diesel:,.2f} Tax Liability", 
+                delta_color="inverse"
+            )
+        with col2:
+            st.metric(
+                label="Green Fleet (Solar BEV)", 
+                value=f"{solar_bev_emissions:,.2f} tCO2", 
+                delta=f"R {tax_solar:,.2f} Tax Liability", 
+                delta_color="normal"
+            )
+        with col3:
+            st.metric(
+                label="Grid BEV (Eskom Coal Mix Warning)", 
+                value=f"{grid_bev_emissions:,.2f} tCO2", 
+                delta=f"R {tax_grid:,.2f} Tax Liability", 
+                delta_color="inverse"
+            )
+
+        st.info("Sustainable Logistics Insight: Calculations utilize dynamic individual shipment payload masses and ISO 14083 activity-based tkm methodology.")
+    else:
+        st.warning("Required distance or weight data not available in the current view.")
+        
     st.divider()
     
     # --- Existing Temperature Distribution (keep it) ---
@@ -240,7 +294,7 @@ with tab3:
     st.subheader("Predictive Risk Intelligence")
     
     # --- Show active selections on screen ---
-    st.info(f"🔍 **Active View Selections** | Status Filter: `{', '.join(selected_status)}` | Total Shipments Evaluated: `{len(filtered_df_ready):,}`")
+    st.info(f"Active View Selections | Status Filter: `{', '.join(selected_status)}` | Total Shipments Evaluated: `{len(filtered_df_ready):,}`")
     
     # --- Risk Threshold Slider (Decision-Support Tool with matching format) ---
     threshold_pct = st.slider(
@@ -275,7 +329,7 @@ with tab3:
     col1.metric("Predicted High-Risk Shipments", high_risk_count)
     col2.metric("High-Risk Fleet Share", f"{high_risk_share:.1f}%")
     
-    st.caption(f"ℹ️ *Model max probability score in current view: **{max_model_prob:.1f}%**. If the threshold is set higher than this, risk count will be zero.*")
+    st.caption(f"Model max probability score in current view: **{max_model_prob:.1f}%**. If the threshold is set higher than this, risk count will be zero.")
     
     st.divider()
 
