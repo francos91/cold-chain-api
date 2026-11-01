@@ -850,103 +850,107 @@ with tab5:
       " Freight Rail (TFR)."
   )
 
-  col_ctrl1, col_ctrl2 = st.columns(2)
-  with col_ctrl1:
-    selected_corridor = st.selectbox(
-        "Select Strategic Corridor", options=list(INTERMODAL_CORRIDOR_DATA.keys())
-    )
-  with col_ctrl2:
-    shift_percentage = st.slider(
-        "Percentage of Freight Shifted from Road to Rail (%)",
-        0,
-        100,
-        30,
-        step=5,
-    )
+  @st.fragment
+  def render_intermodal_fragment(data, corridor_data):
+      col_ctrl1, col_ctrl2 = st.columns(2)
+      with col_ctrl1:
+        selected_corridor = st.selectbox(
+            "Select Strategic Corridor", options=list(corridor_data.keys())
+        )
+      with col_ctrl2:
+        shift_percentage = st.slider(
+            "Percentage of Freight Shifted from Road to Rail (%)",
+            0,
+            100,
+            30,
+            step=5,
+        )
 
-  params = INTERMODAL_CORRIDOR_DATA[selected_corridor]
+      params = corridor_data[selected_corridor]
 
-  if not filtered_df_ready.empty and "distance_km" in filtered_df_ready.columns:
-    total_corridor_tkm = (
-        filtered_df_ready["distance_km"] * filtered_df_ready["weight_tonnes"]
-    ).sum()
-    total_shipments = len(filtered_df_ready)
-  else:
-    total_corridor_tkm = 580000.0
-    total_shipments = 45
+      if not data.empty and "distance_km" in data.columns:
+        total_corridor_tkm = (
+            data["distance_km"] * data["weight_tonnes"]
+        ).sum()
+        total_shipments = len(data)
+      else:
+        total_corridor_tkm = 580000.0
+        total_shipments = 45
 
-  baseline_emissions_tonnes = (
-      total_corridor_tkm * params["road_emission_factor"]
-  ) / 1_000_000
-  baseline_cost = (
-      total_corridor_tkm * (params["road_cost_per_km"] / 50.0)
-  ) + (total_shipments * 2500)
+      baseline_emissions_tonnes = (
+          total_corridor_tkm * params["road_emission_factor"]
+      ) / 1_000_000
+      baseline_cost = (
+          total_corridor_tkm * (params["road_cost_per_km"] / 50.0)
+      ) + (total_shipments * 2500)
 
-  rail_tkm = total_corridor_tkm * (shift_percentage / 100.0)
-  remaining_road_tkm = total_corridor_tkm * (
-      1 - (shift_percentage / 100.0)
-  )
+      rail_tkm = total_corridor_tkm * (shift_percentage / 100.0)
+      remaining_road_tkm = total_corridor_tkm * (
+          1 - (shift_percentage / 100.0)
+      )
 
-  new_emissions_tonnes = (
-      (remaining_road_tkm * params["road_emission_factor"])
-      + (rail_tkm * params["rail_emission_factor"])
-  ) / 1_000_000
+      new_emissions_tonnes = (
+          (remaining_road_tkm * params["road_emission_factor"])
+          + (rail_tkm * params["rail_emission_factor"])
+      ) / 1_000_000
 
-  carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-  carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
+      carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
+      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
 
-  avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
-  avg_rail_hours = (
-      params["rail_distance_km"] / params["avg_rail_speed_kmh"]
-  ) + 18.0
-  transit_time_delta_hrs = (shift_percentage / 100.0) * (
-      avg_rail_hours - avg_road_hours
-  )
+      avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
+      avg_rail_hours = (
+          params["rail_distance_km"] / params["avg_rail_speed_kmh"]
+      ) + 18.0
+      transit_time_delta_hrs = (shift_percentage / 100.0) * (
+          avg_rail_hours - avg_road_hours
+      )
 
-  col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-  col_m1.metric(
-      "Carbon Emissions Delta",
-      f"-{carbon_savings_tonnes:.2f} tCO2",
-      delta=f"{shift_percentage}% Rail Shift",
-  )
-  col_m2.metric(
-      "Carbon Tax Liability Saved",
-      f"R {carbon_tax_savings_zar:,.2f}",
-      delta="Financial Benefit",
-      delta_color="normal",
-  )
-  col_m3.metric(
-      "Modal Distance Factor",
-      f"{params['rail_distance_km']} km",
-      delta=f"Road: {params['road_distance_km']} km",
-      delta_color="off",
-  )
-  col_m4.metric(
-      "Transit Time Impact",
-      f"+{transit_time_delta_hrs:.1f} hrs",
-      delta="Terminal Delay Penalty",
-      delta_color="inverse",
-  )
+      col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+      col_m1.metric(
+          "Carbon Emissions Delta",
+          f"-{carbon_savings_tonnes:.2f} tCO2",
+          delta=f"{shift_percentage}% Rail Shift",
+      )
+      col_m2.metric(
+          "Carbon Tax Liability Saved",
+          f"R {carbon_tax_savings_zar:,.2f}",
+          delta="Financial Benefit",
+          delta_color="normal",
+      )
+      col_m3.metric(
+          "Modal Distance Factor",
+          f"{params['rail_distance_km']} km",
+          delta=f"Road: {params['road_distance_km']} km",
+          delta_color="off",
+      )
+      col_m4.metric(
+          "Transit Time Impact",
+          f"+{transit_time_delta_hrs:.1f} hrs",
+          delta="Terminal Delay Penalty",
+          delta_color="inverse",
+      )
 
-  st.markdown("### Modal Performance Comparison")
-  comparison_df = pd.DataFrame({
-      "Metric": [
-          "Carbon Footprint (tCO2e)",
-          "Estimated Cost Index (ZAR)",
-          "Average Transit Time (Hours)",
-      ],
-      "Baseline (100% Road)": [
-          baseline_emissions_tonnes,
-          baseline_cost,
-          avg_road_hours,
-      ],
-      f"Simulated ({shift_percentage}% Rail)": [
-          new_emissions_tonnes,
-          baseline_cost * 0.92,
-          avg_road_hours
-          + ((shift_percentage / 100.0) * max(0, transit_time_delta_hrs)),
-      ],
-  })
-  st.dataframe(
-      comparison_df.set_index("Metric"), use_container_width=True
-  )
+      st.markdown("### Modal Performance Comparison")
+      comparison_df = pd.DataFrame({
+          "Metric": [
+              "Carbon Footprint (tCO2e)",
+              "Estimated Cost Index (ZAR)",
+              "Average Transit Time (Hours)",
+          ],
+          "Baseline (100% Road)": [
+              baseline_emissions_tonnes,
+              baseline_cost,
+              avg_road_hours,
+          ],
+          f"Simulated ({shift_percentage}% Rail)": [
+              new_emissions_tonnes,
+              baseline_cost * 0.92,
+              avg_road_hours
+              + ((shift_percentage / 100.0) * max(0, transit_time_delta_hrs)),
+          ],
+      })
+      st.dataframe(
+          comparison_df.set_index("Metric"), use_container_width=True
+      )
+
+  render_intermodal_fragment(filtered_df_ready, INTERMODAL_CORRIDOR_DATA)
