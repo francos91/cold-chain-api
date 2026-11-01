@@ -58,7 +58,7 @@ cold-chain-api/
 ├── Notes.md                 # Design notes
 ├── requirements.txt         # Backend / core dependencies
 └── system_architecture.md   # Architecture specifications
-
+```
 
 ## Testing & CI/CD Pipeline
 This repository implements rigorous software engineering practices tailored for industrial logistics systems:
