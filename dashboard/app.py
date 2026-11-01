@@ -150,6 +150,19 @@ selected_status = st.sidebar.multiselect(
 filtered_df = df[df["status"].isin(selected_status)]
 filtered_df_ready = df_ready[df_ready["status"].isin(selected_status)]
 
+# Pre-calculate ML probabilities so we don't recalculate on every slider move
+X_pred = filtered_df_ready[[
+    "route_enc",
+    "route_risk_score",
+    "is_delayed",
+    "distance_km",
+    "transit_time_hours",
+]]
+if not X_pred.empty:
+    filtered_df_ready["risk_probability"] = model.predict_proba(X_pred)[:, 1]
+else:
+    filtered_df_ready["risk_probability"] = 0.0
+
 # 6. Intermodal Corridor Reference Database
 INTERMODAL_CORRIDOR_DATA = {
     "Johannesburg_to_Durban (Natcor)": {
@@ -301,7 +314,7 @@ with tab1:
   DIESEL_EMISSION_FACTOR = 73.2
   GRID_BEV_EMISSION_FACTOR = 156.8
   SOLAR_BEV_EMISSION_FACTOR = 6.4
-  CARBON_TAX_RATE = 462
+  CARBON_TAX_RATE = 28.0 # Corrected South African effective rate
 
   if (
       not filtered_df_ready.empty
@@ -392,148 +405,145 @@ with tab3:
       f" Total Shipments Evaluated: `{len(filtered_df_ready):,}`"
   )
 
-  threshold_pct = st.slider(
-      "Risk Threshold (%)",
-      min_value=5,
-      max_value=95,
-      value=20,
-      step=5,
-      format="%d%%",
-      help=(
-          "Lower threshold = catches more breaches (higher recall), but may"
-          " increase false alarms (lower precision)."
-      ),
-  )
+  @st.fragment
+  def render_risk_fragment(data):
+      threshold_pct = st.slider(
+          "Risk Threshold (%)",
+          min_value=5,
+          max_value=95,
+          value=20,
+          step=5,
+          format="%d%%",
+          help=(
+              "Lower threshold = catches more breaches (higher recall), but may"
+              " increase false alarms (lower precision)."
+          ),
+      )
+    
+      threshold = threshold_pct / 100.0
+    
+      st.caption(
+          f"Currently using a **{threshold_pct}%** threshold. Shipments with a"
+          " probability above this are flagged as high-risk."
+      )
+    
+      data["predicted_risk"] = (
+          data["risk_probability"] >= threshold
+      ).astype(int)
+    
+      high_risk_count = int(data["predicted_risk"].sum())
+      total_count = len(data)
+      high_risk_share = (
+          (high_risk_count / total_count) * 100 if total_count > 0 else 0
+      )
+      max_model_prob = (
+          data["risk_probability"].max() * 100
+          if len(data) > 0
+          else 0
+      )
+    
+      col1, col2 = st.columns(2)
+      col1.metric("Predicted High-Risk Shipments", high_risk_count)
+      col2.metric("High-Risk Fleet Share", f"{high_risk_share:.1f}%")
+    
+      st.caption(
+          "Model max probability score in current view:"
+          f" **{max_model_prob:.1f}%**. If the threshold is set higher than this,"
+          " risk count will be zero."
+      )
+    
+      st.divider()
+    
+      st.markdown("### Top 5 Highest Risk Shipments")
+    
+      high_risk_df = data[
+          (data["predicted_risk"] == 1)
+          & (data["status"] != "delivered")
+      ]
+    
+      top_5_df = high_risk_df.sort_values(
+          "risk_probability", ascending=False
+      ).head(5)
+    
+      if len(top_5_df) > 0:
+        display_cols = [
+            "shipment_id",
+            "origin",
+            "destination",
+            "temperature_celsius",
+            "status",
+            "risk_probability",
+        ]
+        st.dataframe(
+            top_5_df[display_cols],
+            use_container_width=True,
+            column_config={
+                "shipment_id": "Shipment ID",
+                "origin": "Origin",
+                "destination": "Destination",
+                "temperature_celsius": st.column_config.NumberColumn(
+                    "Temperature (°C)", format="%.2f"
+                ),
+                "status": "Status",
+                "risk_probability": st.column_config.NumberColumn(
+                    "Risk Probability", format="%.1f%%"
+                ),
+            },
+        )
+    
+        highest_risk = top_5_df.iloc[0]
+        st.metric(
+            f"Highest Risk: {highest_risk['shipment_id']}",
+            f"{highest_risk['risk_probability']:.1%}",
+            delta=f"{highest_risk['origin']} -> {highest_risk['destination']}",
+        )
+      else:
+        st.success(
+            "No active high-risk shipments predicted at the"
+            f" **{threshold_pct}%** threshold!"
+        )
+    
+      st.divider()
+    
+      st.markdown("### Full High-Risk Shipments List")
+    
+      if len(high_risk_df) > 0:
+        display_cols = [
+            "shipment_id",
+            "origin",
+            "destination",
+            "temperature_celsius",
+            "status",
+            "risk_probability",
+        ]
+        st.dataframe(
+            high_risk_df[display_cols],
+            use_container_width=True,
+            column_config={
+                "shipment_id": "Shipment ID",
+                "origin": "Origin",
+                "destination": "Destination",
+                "temperature_celsius": st.column_config.NumberColumn(
+                    "Temperature (°C)", format="%.2f"
+                ),
+                "status": "Status",
+                "risk_probability": st.column_config.NumberColumn(
+                    "Risk Probability", format="%.1f%%"
+                ),
+            },
+        )
+        st.caption(
+            "Showing "
+            f"{len(high_risk_df)} active high-risk shipments at the"
+            f" **{threshold_pct}%** threshold."
+        )
+      else:
+        st.success(
+            f"No active high-risk shipments at the **{threshold_pct}%** threshold!"
+        )
 
-  threshold = threshold_pct / 100.0
-
-  st.caption(
-      f"Currently using a **{threshold_pct}%** threshold. Shipments with a"
-      " probability above this are flagged as high-risk."
-  )
-
-  X_pred = filtered_df_ready[[
-      "route_enc",
-      "route_risk_score",
-      "is_delayed",
-      "distance_km",
-      "transit_time_hours",
-  ]]
-  filtered_df_ready["risk_probability"] = model.predict_proba(X_pred)[:, 1]
-  filtered_df_ready["predicted_risk"] = (
-      filtered_df_ready["risk_probability"] >= threshold
-  ).astype(int)
-
-  high_risk_count = int(filtered_df_ready["predicted_risk"].sum())
-  total_count = len(filtered_df_ready)
-  high_risk_share = (
-      (high_risk_count / total_count) * 100 if total_count > 0 else 0
-  )
-  max_model_prob = (
-      filtered_df_ready["risk_probability"].max() * 100
-      if len(filtered_df_ready) > 0
-      else 0
-  )
-
-  col1, col2 = st.columns(2)
-  col1.metric("Predicted High-Risk Shipments", high_risk_count)
-  col2.metric("High-Risk Fleet Share", f"{high_risk_share:.1f}%")
-
-  st.caption(
-      "Model max probability score in current view:"
-      f" **{max_model_prob:.1f}%**. If the threshold is set higher than this,"
-      " risk count will be zero."
-  )
-
-  st.divider()
-
-  st.markdown("### Top 5 Highest Risk Shipments")
-
-  high_risk_df = filtered_df_ready[
-      (filtered_df_ready["predicted_risk"] == 1)
-      & (filtered_df_ready["status"] != "delivered")
-  ]
-
-  top_5_df = high_risk_df.sort_values(
-      "risk_probability", ascending=False
-  ).head(5)
-
-  if len(top_5_df) > 0:
-    display_cols = [
-        "shipment_id",
-        "origin",
-        "destination",
-        "temperature_celsius",
-        "status",
-        "risk_probability",
-    ]
-    st.dataframe(
-        top_5_df[display_cols],
-        use_container_width=True,
-        column_config={
-            "shipment_id": "Shipment ID",
-            "origin": "Origin",
-            "destination": "Destination",
-            "temperature_celsius": st.column_config.NumberColumn(
-                "Temperature (°C)", format="%.2f"
-            ),
-            "status": "Status",
-            "risk_probability": st.column_config.NumberColumn(
-                "Risk Probability", format="%.1f%%"
-            ),
-        },
-    )
-
-    highest_risk = top_5_df.iloc[0]
-    st.metric(
-        f"Highest Risk: {highest_risk['shipment_id']}",
-        f"{highest_risk['risk_probability']:.1%}",
-        delta=f"{highest_risk['origin']} -> {highest_risk['destination']}",
-    )
-  else:
-    st.success(
-        "No active high-risk shipments predicted at the"
-        f" **{threshold_pct}%** threshold!"
-    )
-
-  st.divider()
-
-  st.markdown("### Full High-Risk Shipments List")
-
-  if len(high_risk_df) > 0:
-    display_cols = [
-        "shipment_id",
-        "origin",
-        "destination",
-        "temperature_celsius",
-        "status",
-        "risk_probability",
-    ]
-    st.dataframe(
-        high_risk_df[display_cols],
-        use_container_width=True,
-        column_config={
-            "shipment_id": "Shipment ID",
-            "origin": "Origin",
-            "destination": "Destination",
-            "temperature_celsius": st.column_config.NumberColumn(
-                "Temperature (°C)", format="%.2f"
-            ),
-            "status": "Status",
-            "risk_probability": st.column_config.NumberColumn(
-                "Risk Probability", format="%.1f%%"
-            ),
-        },
-    )
-    st.caption(
-        "Showing "
-        f"{len(high_risk_df)} active high-risk shipments at the"
-        f" **{threshold_pct}%** threshold."
-    )
-  else:
-    st.success(
-        "No active high-risk shipments at the **{threshold_pct}%** threshold!"
-    )
+  # Call the fragment function
+  render_risk_fragment(filtered_df_ready)
 
   st.markdown("### High-Risk Routes Analysis")
   route_risk = (
@@ -816,9 +826,11 @@ with tab4:
     breach_time = first_breach["time_minutes"]
     st.warning(
         "**Breach Detected**: The selected shipment breached the 8°C threshold"
-        f" at **{breach_time} minutes**.\n- **Location**: Latitude"
+        f" at **{breach_time} minutes**.
+- **Location**: Latitude"
         f" {first_breach['latitude']:.4f}, Longitude"
-        f" {first_breach['longitude']:.4f}\n- **Recommendation**: Check if this"
+        f" {first_breach['longitude']:.4f}
+- **Recommendation**: Check if this"
         " location corresponds to a known traffic bottleneck or delivery stop."
     )
   else:
@@ -878,7 +890,7 @@ with tab5:
   ) / 1_000_000
 
   carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-  carbon_tax_savings_zar = carbon_savings_tonnes * 462
+  carbon_tax_savings_zar = carbon_savings_tonnes * 28.0 # Corrected South African effective rate
 
   avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
   avg_rail_hours = (
