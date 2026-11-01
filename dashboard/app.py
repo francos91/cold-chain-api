@@ -9,8 +9,27 @@ from scipy.spatial.distance import euclidean
 from supabase import create_client
 import streamlit as st
 
-# 1. Page Configuration
-st.set_page_config(page_title="Logistics Dashboard", layout="wide")
+# 1. Page Configuration & Professional Styling Injection
+st.set_page_config(page_title="Cold Chain Logistics Dashboard", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    /* Professional Industrial Control Tower Styling */
+    div[data-testid="stMetric"] {
+        background-color: #0E1117;
+        border: 1px solid #262730;
+        padding: 14px;
+        border-radius: 6px;
+    }
+    .stApp {
+        background-color: #0E1117;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Cold Chain Logistics Dashboard")
 
 
@@ -314,6 +333,11 @@ with tab1:
               "in-transit": "#FFA500",
           },
       )
+      fig_cost.update_layout(
+          template="plotly_dark",
+          paper_bgcolor="rgba(0,0,0,0)",
+          plot_bgcolor="rgba(0,0,0,0)",
+      )
       st.plotly_chart(fig_cost, use_container_width=True)
 
   st.divider()
@@ -386,6 +410,11 @@ with tab1:
       x="temperature_celsius",
       nbins=20,
       color_discrete_sequence=["#008080"],
+  )
+  fig.update_layout(
+      template="plotly_dark",
+      paper_bgcolor="rgba(0,0,0,0)",
+      plot_bgcolor="rgba(0,0,0,0)",
   )
   st.plotly_chart(fig, use_container_width=True)
 
@@ -568,6 +597,11 @@ with tab3:
       y="route",
       orientation="h",
       title="Routes with Highest Excursion Frequency",
+  )
+  fig_risk.update_layout(
+      template="plotly_dark",
+      paper_bgcolor="rgba(0,0,0,0)",
+      plot_bgcolor="rgba(0,0,0,0)",
   )
   st.plotly_chart(fig_risk, use_container_width=True)
 
@@ -781,6 +815,9 @@ with tab4:
       yaxis_title="Temperature (°C)",
       height=450,
       hovermode="x unified",
+      template="plotly_dark",
+      paper_bgcolor="rgba(0,0,0,0)",
+      plot_bgcolor="rgba(0,0,0,0)",
   )
   st.plotly_chart(fig, use_container_width=True)
 
@@ -828,6 +865,9 @@ with tab4:
   fig_map.update_layout(
       map_style="open-street-map",
       map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6),
+      template="plotly_dark",
+      paper_bgcolor="rgba(0,0,0,0)",
+      plot_bgcolor="rgba(0,0,0,0)",
   )
   fig_map.update_traces(marker=dict(size=8))
   st.plotly_chart(fig_map, use_container_width=True)
