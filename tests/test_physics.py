@@ -10,11 +10,11 @@ def test_iso_14083_carbon_accounting():
     assert emissions == 7.32, f"Expected 7.32 tonnes, got {emissions}"
 
 def test_carbon_tax_liability():
-    # Test statutory carbon tax rate of R462/tonne
+    # Test South African effective carbon tax rate of R28.00/tonne (incorporating basic allowances)
     emissions_tonnes = 10.0
-    tax_rate = 462.0
+    tax_rate = 28.0
     tax_liability = emissions_tonnes * tax_rate
-    assert tax_liability == 4620.0, f"Expected R4,620, got R{tax_liability}"
+    assert tax_liability == 280.0, f"Expected R280, got R{tax_liability}"
 
 def test_cost_to_serve_formula():
     # Test transport cost formula: (distance * rate) + fixed
