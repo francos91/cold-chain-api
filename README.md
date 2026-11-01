@@ -36,27 +36,28 @@ This is the core predictive model operating inside the Streamlit Control Tower. 
 - **Role in Pipeline:** Loaded directly into `app.py`. It powers the dynamic Risk Threshold Slider (optimized with `@st.fragment` for high-performance UI rendering), allowing operations managers to identify and intercept high-risk fleet assets based on their continuous probability scores.
 
 ## Repository Structure
+```text
 cold-chain-api/
-├── .devcontainer/           container configuration
+├── .devcontainer/           # Dev container configuration
 ├── .github/
 │   └── workflows/
-│       └── ci.yml            Actions CI/CD pipeline
+│       └── ci.yml           # GitHub Actions CI/CD pipeline
 ├── dashboard/
-│   ├── app.py               frontend Control Tower
-│   ├── advanced_model.pkl          5-Feature Random Forest model
-│   ├── lade_delay_model.pkl    delay predictor
-│   ├── lade_features.pkl        order for delay predictor
-│   ├── le_route.pkl          encoder for route mapping
-│   └── requirements.txt     dependencies
-├── tests/                   automated testing suite
-│   ├── test_api.py          endpoint integration tests
-│   ├── test_ml_model.py        shape and inference checks
-│   ├── test_physics.py      accounting and cost-to-serve tests
-│   └── test_thermal.py      excursion boundary validations
-├── main.py                    backend service (Render deployment)
-├── Notes.md                    design notes
-├── requirements.txt          environment dependencies
-└── system_architecture.md   architecture specifications
+│   ├── app.py               # Streamlit frontend (control tower)
+│   ├── advanced_model.pkl   # RF breach-risk model
+│   ├── lade_delay_model.pkl # LaDe-trained delay predictor (simulation only)
+│   ├── lade_features.pkl    # Feature order for delay predictor
+│   ├── le_route.pkl         # Label encoder for routes
+│   └── requirements.txt     # Dashboard dependencies
+├── tests/
+│   ├── test_api.py          # FastAPI endpoint tests
+│   ├── test_ml_model.py     # ML feature-shape & inference checks
+│   ├── test_physics.py      # Cost-to-serve & carbon-accounting tests
+│   └── test_thermal.py      # Thermal excursion boundary tests
+├── main.py                  # FastAPI backend (Render deployment)
+├── Notes.md                 # Design notes
+├── requirements.txt         # Backend / core dependencies
+└── system_architecture.md   # Architecture specifications
 
 
 ## Testing & CI/CD Pipeline
