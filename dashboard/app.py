@@ -292,15 +292,21 @@ with tab1:
       )
 
     with col_b:
+      # FIXED: Normalized status to lowercase and sampled randomly to ensure delayed and in-transit points are visible
+      plot_data = filtered_df_ready.copy()
+      plot_data["status_lower"] = plot_data["status"].str.lower()
+      sample_df = plot_data.sample(n=min(500, len(plot_data)), random_state=42)
+
       fig_cost = px.scatter(
-          filtered_df_ready.head(500),
+          sample_df,
           x="distance_km",
           y="cost_per_shipment",
-          color="status",
+          color="status_lower",
           title="Shipment Cost vs. Distance Physics",
           labels={
               "distance_km": "Distance (km)",
               "cost_per_shipment": "Cost (ZAR)",
+              "status_lower": "Status",
           },
           color_discrete_map={
               "delivered": "#008080",
