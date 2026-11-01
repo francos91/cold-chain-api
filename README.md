@@ -37,26 +37,27 @@ This is the core predictive model operating inside the Streamlit Control Tower. 
 
 ## Repository Structure
 cold-chain-api/
-├── .devcontainer/           # Development container configuration
+├── .devcontainer/           container configuration
 ├── .github/
 │   └── workflows/
-│       └── ci.yml           # GitHub Actions CI/CD pipeline
+│       └── ci.yml            Actions CI/CD pipeline
 ├── dashboard/
-│   ├── app.py               # Streamlit frontend Control Tower
-│   ├── advanced_model.pkl   # Production 5-Feature Random Forest model
-│   ├── lade_delay_model.pkl # Simulation delay predictor
-│   ├── lade_features.pkl    # Feature order for delay predictor
-│   ├── le_route.pkl         # Label encoder for route mapping
-│   └── requirements.txt     # Python dependencies
-├── tests/                   # Pytest automated testing suite
-│   ├── test_api.py          # FastAPI endpoint integration tests
-│   ├── test_ml_model.py     # ML feature shape and inference checks
-│   ├── test_physics.py      # Carbon accounting and cost-to-serve tests
-│   └── test_thermal.py      # Thermal excursion boundary validations
-├── main.py                  # FastAPI backend service (Render deployment)
-├── Notes.md                 # Project design notes
-├── requirements.txt         # Root environment dependencies
-└── system_architecture.md   # System architecture specifications
+│   ├── app.py               frontend Control Tower
+│   ├── advanced_model.pkl          5-Feature Random Forest model
+│   ├── lade_delay_model.pkl    delay predictor
+│   ├── lade_features.pkl        order for delay predictor
+│   ├── le_route.pkl          encoder for route mapping
+│   └── requirements.txt     dependencies
+├── tests/                   automated testing suite
+│   ├── test_api.py          endpoint integration tests
+│   ├── test_ml_model.py        shape and inference checks
+│   ├── test_physics.py      accounting and cost-to-serve tests
+│   └── test_thermal.py      excursion boundary validations
+├── main.py                    backend service (Render deployment)
+├── Notes.md                    design notes
+├── requirements.txt          environment dependencies
+└── system_architecture.md   architecture specifications
+
 
 ## Testing & CI/CD Pipeline
 This repository implements rigorous software engineering practices tailored for industrial logistics systems:
