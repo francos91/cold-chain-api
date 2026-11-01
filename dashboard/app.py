@@ -843,7 +843,7 @@ with tab4:
 # TAB 5: INTERMODAL WHAT-IF SIMULATOR
 # =============================================
 with tab5:
-  st.subheader("Intermodal Mode-Switching What-If Scenario Simulator")
+  st.subheader("Intermodal Mode-Switching")
   st.markdown(
       "Evaluate the carbon, tax, and cost-to-serve trade-offs of shifting"
       " long-haul refrigerated freight from road corridors (N3/N1) to Transnet"
