@@ -314,7 +314,7 @@ with tab1:
   DIESEL_EMISSION_FACTOR = 73.2
   GRID_BEV_EMISSION_FACTOR = 156.8
   SOLAR_BEV_EMISSION_FACTOR = 6.4
-  CARBON_TAX_RATE = 28.0 # Corrected South African effective rate
+  CARBON_TAX_RATE = 28.0  # Corrected South African effective rate
 
   if (
       not filtered_df_ready.empty
@@ -825,13 +825,10 @@ with tab4:
     first_breach = breach_df.iloc[0]
     breach_time = first_breach["time_minutes"]
     st.warning(
-        "**Breach Detected**: The selected shipment breached the 8°C threshold"
-        f" at **{breach_time} minutes**.
-- **Location**: Latitude"
-        f" {first_breach['latitude']:.4f}, Longitude"
-        f" {first_breach['longitude']:.4f}
-- **Recommendation**: Check if this"
-        " location corresponds to a known traffic bottleneck or delivery stop."
+        f"**Breach Detected**: The selected shipment breached the 8°C threshold "
+        f"at **{breach_time} minutes**.\n"
+        f"- **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}\n"
+        f"- **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop."
     )
   else:
     st.success("No breaches detected for the selected shipment.")
@@ -890,7 +887,7 @@ with tab5:
   ) / 1_000_000
 
   carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-  carbon_tax_savings_zar = carbon_savings_tonnes * 28.0 # Corrected South African effective rate
+  carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
 
   avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
   avg_rail_hours = (
