@@ -51,6 +51,13 @@ def get_data():
   return pd.DataFrame(all_data)
 
 
+# CACHED: Temperature stream data to eliminate Tab 4 loading delay
+@st.cache_data(ttl=600)
+def get_temperature_stream():
+  response = supabase.table("temperature_stream").select("*").execute()
+  return pd.DataFrame(response.data)
+
+
 # 3. Load the Advanced Model & Encoder
 @st.cache_resource
 def load_advanced_model():
@@ -574,8 +581,7 @@ with tab4:
   st.caption(f"Active Status Filter: **{', '.join(selected_status)}**")
 
   with st.spinner("Loading thermal profile data..."):
-    ts_response = supabase.table("temperature_stream").select("*").execute()
-    ts_df = pd.DataFrame(ts_response.data)
+    ts_df = get_temperature_stream()
 
   if len(ts_df) == 0:
     st.warning(
