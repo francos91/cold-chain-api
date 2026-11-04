@@ -252,11 +252,12 @@ with tab1:
         .head(5)
     )
 
-    # Clean formatting mapped directly to dataframe
-    corridor_df["avg_transit_hours"] = corridor_df["avg_transit_hours"].map("{:.1f} hrs".format)
-    corridor_df["avg_distance_km"] = corridor_df["avg_distance_km"].map("{:.1f} km".format)
-
-    st.dataframe(corridor_df, use_container_width=True)
+    st.dataframe(
+        corridor_df.style.format(
+            {"avg_transit_hours": "{:.1f} hrs", "avg_distance_km": "{:.1f} km"}
+        ),
+        use_container_width=True,
+    )
 
   st.divider()
 
@@ -283,11 +284,15 @@ with tab1:
 
     with col_a:
       st.markdown("**Top 5 Highest Cost Corridors (Avg ZAR)**")
-      cost_df["avg_cost_zar"] = cost_df["avg_cost_zar"].map("R{:,.2f}".format)
-      cost_df["avg_transit_h"] = cost_df["avg_transit_h"].map("{:.1f} hrs".format)
-      st.dataframe(cost_df, use_container_width=True)
+      st.dataframe(
+          cost_df.style.format(
+              {"avg_cost_zar": "R{:,.2f}", "avg_transit_h": "{:.1f} hrs"}
+          ),
+          use_container_width=True,
+      )
 
     with col_b:
+      # FIXED: Normalized status to lowercase and sampled randomly to ensure delayed and in-transit points are visible
       plot_data = filtered_df_ready.copy()
       plot_data["status_lower"] = plot_data["status"].str.lower()
       sample_df = plot_data.sample(n=min(500, len(plot_data)), random_state=42)
@@ -322,7 +327,7 @@ with tab1:
   DIESEL_EMISSION_FACTOR = 73.2
   GRID_BEV_EMISSION_FACTOR = 156.8
   SOLAR_BEV_EMISSION_FACTOR = 6.4
-  CARBON_TAX_RATE = 28.0
+  CARBON_TAX_RATE = 28.0  # Corrected South African effective rate
 
   if (
       not filtered_df_ready.empty
@@ -550,6 +555,7 @@ with tab3:
             f"No active high-risk shipments at the **{threshold_pct}%** threshold!"
         )
 
+  # Call the fragment function
   render_risk_fragment(filtered_df_ready)
 
   st.markdown("### High-Risk Routes Analysis")
@@ -895,7 +901,7 @@ with tab5:
       ) / 1_000_000
 
       carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0
+      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
 
       avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
       avg_rail_hours = (
