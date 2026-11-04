@@ -4,8 +4,8 @@
 A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
 
 ## Live Demo
-The dashboard is deployed at: https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/
-
+The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/
+](https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/)
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
 
