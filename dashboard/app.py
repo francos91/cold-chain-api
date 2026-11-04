@@ -954,7 +954,8 @@ with tab5:
           ],
           f"Simulated ({shift_percentage}% Rail)": [
               new_emissions_tonnes,
-              baseline_cost * 0.92,
+              # FIXED: cost now scales smoothly from 100% (0% rail) to 92% (100% rail)
+              baseline_cost * (1 - (shift_percentage / 100.0) * 0.08),
               avg_road_hours
               + ((shift_percentage / 100.0) * max(0, transit_time_delta_hrs)),
           ],
