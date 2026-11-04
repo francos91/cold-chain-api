@@ -252,11 +252,11 @@ with tab1:
         .head(5)
     )
 
-    # Clean formatting mapped directly to dataframe to avoid styler mapping bugs
+    # Clean formatting mapped directly to dataframe
     corridor_df["avg_transit_hours"] = corridor_df["avg_transit_hours"].map("{:.1f} hrs".format)
     corridor_df["avg_distance_km"] = corridor_df["avg_distance_km"].map("{:.1f} km".format)
 
-    st.dataframe(corridor_df, width="stretch")
+    st.dataframe(corridor_df, use_container_width=True)
 
   st.divider()
 
@@ -285,7 +285,7 @@ with tab1:
       st.markdown("**Top 5 Highest Cost Corridors (Avg ZAR)**")
       cost_df["avg_cost_zar"] = cost_df["avg_cost_zar"].map("R{:,.2f}".format)
       cost_df["avg_transit_h"] = cost_df["avg_transit_h"].map("{:.1f} hrs".format)
-      st.dataframe(cost_df, width="stretch")
+      st.dataframe(cost_df, use_container_width=True)
 
     with col_b:
       plot_data = filtered_df_ready.copy()
@@ -309,7 +309,7 @@ with tab1:
               "in-transit": "#FFA500",
           },
       )
-      st.plotly_chart(fig_cost, width="stretch")
+      st.plotly_chart(fig_cost, use_container_width=True)
 
   st.divider()
 
@@ -382,7 +382,7 @@ with tab1:
       nbins=20,
       color_discrete_sequence=["#008080"],
   )
-  st.plotly_chart(fig, width="stretch")
+  st.plotly_chart(fig, use_container_width=True)
 
   with st.expander("SCOR Framework Alignment"):
     st.markdown("""
@@ -398,7 +398,7 @@ with tab2:
   st.caption(f"Displaying rows for status: **{', '.join(selected_status)}**")
   st.dataframe(
       filtered_df,
-      width="stretch",
+      use_container_width=True,
       column_config={
           "temperature_celsius": st.column_config.NumberColumn(
               "Temperature (°C)", format="%.2f"
@@ -484,7 +484,7 @@ with tab3:
         ]
         st.dataframe(
             top_5_df[display_cols],
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "shipment_id": "Shipment ID",
                 "origin": "Origin",
@@ -526,7 +526,7 @@ with tab3:
         ]
         st.dataframe(
             high_risk_df[display_cols],
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "shipment_id": "Shipment ID",
                 "origin": "Origin",
@@ -563,7 +563,7 @@ with tab3:
       orientation="h",
       title="Routes with Highest Excursion Frequency",
   )
-  st.plotly_chart(fig_risk, width="stretch")
+  st.plotly_chart(fig_risk, use_container_width=True)
 
   st.info(
       "The model analysis indicates that spatial routing characteristics"
@@ -776,7 +776,7 @@ with tab4:
       height=450,
       hovermode="x unified",
   )
-  st.plotly_chart(fig, width="stretch")
+  st.plotly_chart(fig, use_container_width=True)
 
   st.subheader("GPS Route (Colored by Temperature)")
 
@@ -824,7 +824,7 @@ with tab4:
       map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6),
   )
   fig_map.update_traces(marker=dict(size=8))
-  st.plotly_chart(fig_map, width="stretch")
+  st.plotly_chart(fig_map, use_container_width=True)
 
   breach_df = ts_selected[ts_selected["temperature"] > 8.0]
   if len(breach_df) > 0:
@@ -950,7 +950,7 @@ with tab5:
           ],
       })
       st.dataframe(
-          comparison_df.set_index("Metric"), width="stretch"
+          comparison_df.set_index("Metric"), use_container_width=True
       )
 
   render_intermodal_fragment(filtered_df_ready, INTERMODAL_CORRIDOR_DATA)
