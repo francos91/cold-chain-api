@@ -256,7 +256,7 @@ with tab1:
         corridor_df.style.format(
             {"avg_transit_hours": "{:.1f} hrs", "avg_distance_km": "{:.1f} km"}
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
   st.divider()
@@ -288,11 +288,10 @@ with tab1:
           cost_df.style.format(
               {"avg_cost_zar": "R{:,.2f}", "avg_transit_h": "{:.1f} hrs"}
           ),
-          use_container_width=True,
+          width="stretch",
       )
 
     with col_b:
-      # FIXED: Normalized status to lowercase and sampled randomly to ensure delayed and in-transit points are visible
       plot_data = filtered_df_ready.copy()
       plot_data["status_lower"] = plot_data["status"].str.lower()
       sample_df = plot_data.sample(n=min(500, len(plot_data)), random_state=42)
@@ -314,7 +313,7 @@ with tab1:
               "in-transit": "#FFA500",
           },
       )
-      st.plotly_chart(fig_cost, use_container_width=True)
+      st.plotly_chart(fig_cost, width="stretch")
 
   st.divider()
 
@@ -327,7 +326,7 @@ with tab1:
   DIESEL_EMISSION_FACTOR = 73.2
   GRID_BEV_EMISSION_FACTOR = 156.8
   SOLAR_BEV_EMISSION_FACTOR = 6.4
-  CARBON_TAX_RATE = 28.0  # Corrected South African effective rate
+  CARBON_TAX_RATE = 28.0
 
   if (
       not filtered_df_ready.empty
@@ -387,7 +386,7 @@ with tab1:
       nbins=20,
       color_discrete_sequence=["#008080"],
   )
-  st.plotly_chart(fig, use_container_width=True)
+  st.plotly_chart(fig, width="stretch")
 
   with st.expander("SCOR Framework Alignment"):
     st.markdown("""
@@ -403,7 +402,7 @@ with tab2:
   st.caption(f"Displaying rows for status: **{', '.join(selected_status)}**")
   st.dataframe(
       filtered_df,
-      use_container_width=True,
+      width="stretch",
       column_config={
           "temperature_celsius": st.column_config.NumberColumn(
               "Temperature (°C)", format="%.2f"
@@ -489,7 +488,7 @@ with tab3:
         ]
         st.dataframe(
             top_5_df[display_cols],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "shipment_id": "Shipment ID",
                 "origin": "Origin",
@@ -531,7 +530,7 @@ with tab3:
         ]
         st.dataframe(
             high_risk_df[display_cols],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "shipment_id": "Shipment ID",
                 "origin": "Origin",
@@ -555,7 +554,6 @@ with tab3:
             f"No active high-risk shipments at the **{threshold_pct}%** threshold!"
         )
 
-  # Call the fragment function
   render_risk_fragment(filtered_df_ready)
 
   st.markdown("### High-Risk Routes Analysis")
@@ -569,7 +567,7 @@ with tab3:
       orientation="h",
       title="Routes with Highest Excursion Frequency",
   )
-  st.plotly_chart(fig_risk, use_container_width=True)
+  st.plotly_chart(fig_risk, width="stretch")
 
   st.info(
       "The model analysis indicates that spatial routing characteristics"
@@ -782,7 +780,7 @@ with tab4:
       height=450,
       hovermode="x unified",
   )
-  st.plotly_chart(fig, use_container_width=True)
+  st.plotly_chart(fig, width="stretch")
 
   st.subheader("GPS Route (Colored by Temperature)")
 
@@ -830,7 +828,7 @@ with tab4:
       map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6),
   )
   fig_map.update_traces(marker=dict(size=8))
-  st.plotly_chart(fig_map, use_container_width=True)
+  st.plotly_chart(fig_map, width="stretch")
 
   breach_df = ts_selected[ts_selected["temperature"] > 8.0]
   if len(breach_df) > 0:
@@ -901,7 +899,7 @@ with tab5:
       ) / 1_000_000
 
       carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
+      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0
 
       avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
       avg_rail_hours = (
@@ -956,7 +954,7 @@ with tab5:
           ],
       })
       st.dataframe(
-          comparison_df.set_index("Metric"), use_container_width=True
+          comparison_df.set_index("Metric"), width="stretch"
       )
 
   render_intermodal_fragment(filtered_df_ready, INTERMODAL_CORRIDOR_DATA)
