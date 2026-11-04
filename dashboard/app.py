@@ -1,11 +1,9 @@
 from pathlib import Path
-from fastdtw import fastdtw
 import joblib
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from scipy.spatial.distance import euclidean
 from supabase import create_client
 import streamlit as st
 
@@ -144,32 +142,40 @@ if st.sidebar.button("Refresh Data"):
   st.cache_data.clear()
   st.rerun()
 
-df = get_data()
-st.sidebar.write(f"Rows fetched from API: {len(df)}")
+# OPTIMIZATION: Cache the heavy ML inference and Feature Engineering
+@st.cache_data(ttl=600)
+def get_processed_data():
+  raw_df = get_data()
+  df_feat = engineer_features_for_app(raw_df)
+  
+  X_pred = df_feat[[
+      "route_enc",
+      "route_risk_score",
+      "is_delayed",
+      "distance_km",
+      "transit_time_hours",
+  ]]
+  if not X_pred.empty:
+      df_feat["risk_probability"] = model.predict_proba(X_pred)[:, 1]
+  else:
+      df_feat["risk_probability"] = 0.0
+      
+  return raw_df, df_feat
 
-df_ready = engineer_features_for_app(df)
+# Load cached data
+df, df_ready = get_processed_data()
+
+st.sidebar.write(f"Rows fetched from API: {len(df)}")
 
 selected_status = st.sidebar.multiselect(
     "Select Status",
     options=df["status"].unique(),
     default=df["status"].unique(),
 )
-# FIXED: .copy() prevents SettingWithCopyWarning on downstream mutations
+
 filtered_df = df[df["status"].isin(selected_status)].copy()
 filtered_df_ready = df_ready[df_ready["status"].isin(selected_status)].copy()
 
-# Pre-calculate ML probabilities so we don't recalculate on every slider move
-X_pred = filtered_df_ready[[
-    "route_enc",
-    "route_risk_score",
-    "is_delayed",
-    "distance_km",
-    "transit_time_hours",
-]]
-if not X_pred.empty:
-    filtered_df_ready["risk_probability"] = model.predict_proba(X_pred)[:, 1]
-else:
-    filtered_df_ready["risk_probability"] = 0.0
 
 # 6. Intermodal Corridor Reference Database
 INTERMODAL_CORRIDOR_DATA = {
