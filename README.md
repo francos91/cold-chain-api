@@ -1,11 +1,13 @@
+
+
 # Cold Chain Logistics Transport Intelligence Dashboard
 [![Cold Chain Logistics CI/CD](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml/badge.svg)](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml)
 
 A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
 
 ## Live Demo
-The dashboard is deployed at: [https://cold-chain-api-imenmgsxnf3subrxxeqw9o.streamlit.app/
-](https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/)
+The dashboard is deployed at: https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/
+
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
 
@@ -121,7 +123,7 @@ South Africa-Specific Literature Sources:
 - [x] Integrate Carbon emissions per trip/route and carbon tax financial exposure modeling (aligned with South African effective rates).
 - [x] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
 - [x] Optimize frontend dashboard performance using `@st.fragment` for instantaneous widget rendering and cached temperature streams.
-- [x] Resolve scatter plot status color-mapping and pagination constraints.
+- [x] Resolve scatter plot status color-mapping and master shipment table pagination constraints.
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
@@ -129,3 +131,4 @@ South Africa-Specific Literature Sources:
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets (Master's Research Proposal core objective).
 - [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
+```
