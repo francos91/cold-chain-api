@@ -402,8 +402,10 @@ with tab1:
 with tab2:
   st.subheader("Logistics Data Table")
   st.caption(f"Displaying rows for status: **{', '.join(selected_status)}**")
+  
+  # MOBILE FIX: Limit rows to 500 so the browser doesn't crash
   st.dataframe(
-      filtered_df,
+      filtered_df.head(500), 
       width="stretch",
       column_config={
           "temperature_celsius": st.column_config.NumberColumn(
@@ -411,6 +413,8 @@ with tab2:
           )
       },
   )
+  if len(filtered_df) > 500:
+      st.caption("Showing the first 500 rows for mobile performance. Use the sidebar to filter.")
 
 with tab3:
   st.subheader("Predictive Risk Intelligence")
@@ -590,264 +594,226 @@ with tab4:
   )
   st.caption(f"Active Status Filter: **{', '.join(selected_status)}**")
 
-  with st.spinner("Loading thermal profile data..."):
-    ts_df = get_temperature_stream()
+  # MOBILE FIX: Lazy-load the 66,000 rows and the heavy GPS map
+  if "thermal_loaded" not in st.session_state:
+    st.session_state.thermal_loaded = False
 
-  if len(ts_df) == 0:
-    st.warning(
-        "No time-series data found. Please run the temperature_stream generator"
-        " first."
-    )
-    st.stop()
+  if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loaded:
+    st.session_state.thermal_loaded = True
 
-  if len(selected_status) == 0:
-    st.info("No status selected in the sidebar. Please select at least one status.")
-    st.stop()
+    with st.spinner("Loading thermal profile data..."):
+      ts_df = get_temperature_stream()
 
-  status_resp = (
-      supabase.table("cold_chain_tracking")
-      .select("shipment_id")
-      .in_("status", selected_status)
-      .execute()
-  )
-  filtered_shipment_ids = [row["shipment_id"] for row in status_resp.data]
-
-  if len(filtered_shipment_ids) == 0:
-    st.info(
-        "No shipments found with status(es):"
-        f" {', '.join(selected_status)}"
-    )
-    st.stop()
-
-  ts_df_filtered = ts_df[ts_df["shipment_id"].isin(filtered_shipment_ids)]
-
-  if len(ts_df_filtered) == 0:
-    st.info(
-        "No time-series data found for shipments with status(es):"
-        f" {', '.join(selected_status)}"
-    )
-    st.stop()
-
-  shipment_ids = ts_df_filtered["shipment_id"].unique()
-
-  selected_id = st.selectbox("Select Shipment to Analyze", shipment_ids, index=0)
-
-  ts_selected = ts_df_filtered[
-      ts_df_filtered["shipment_id"] == selected_id
-  ].sort_values("time_minutes")
-
-  if len(ts_selected) == 0:
-    st.warning("No temperature data found for this shipment.")
-    st.stop()
-
-  status_resp_single = (
-      supabase.table("cold_chain_tracking")
-      .select("status")
-      .eq("shipment_id", selected_id)
-      .execute()
-  )
-  if len(status_resp_single.data) == 0:
-    st.warning("Shipment not found in the main table.")
-    st.stop()
-  shipment_status = status_resp_single.data[0]["status"]
-
-  st.subheader("Quick Summary")
-  col1, col2, col3 = st.columns(3)
-  col1.metric("Shipment", selected_id)
-  col2.metric("Status", shipment_status.capitalize())
-  col3.metric("Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
-
-  st.subheader("Comparison to Average")
-
-  status_resp_all = (
-      supabase.table("cold_chain_tracking")
-      .select("shipment_id")
-      .eq("status", shipment_status)
-      .execute()
-  )
-  same_status_ids = [row["shipment_id"] for row in status_resp_all.data]
-
-  same_status_data = ts_df_filtered[
-      ts_df_filtered["shipment_id"].isin(same_status_ids)
-  ]
-
-  if len(same_status_data) > 0:
-    avg_per_shipment = same_status_data.groupby("shipment_id")[
-        "temperature"
-    ].mean()
-    status_avg_temp = avg_per_shipment.mean()
-    status_std_temp = avg_per_shipment.std()
-    selected_avg_temp = ts_selected["temperature"].mean()
-    temp_diff = selected_avg_temp - status_avg_temp
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric(f"Status Average ({shipment_status})", f"{status_avg_temp:.1f}°C")
-    col2.metric("Your Shipment", f"{selected_avg_temp:.1f}°C")
-
-    if temp_diff > 0:
-      col3.metric(
-          "Difference",
-          f"+{temp_diff:.1f}°C",
-          delta="Warmer than average",
-          delta_color="inverse",
-      )
-      st.warning(
-          "This shipment is **"
-          f"{temp_diff:.1f}°C warmer** than the average {shipment_status}"
-          " shipment."
-      )
+    if len(ts_df) == 0:
+      st.warning("No time-series data found. Please run the generator first.")
+    elif len(selected_status) == 0:
+      st.info("No status selected in the sidebar.")
     else:
-      col3.metric(
-          "Difference",
-          f"{temp_diff:.1f}°C",
-          delta="Cooler than average",
-          delta_color="normal",
+      status_resp = (
+          supabase.table("cold_chain_tracking")
+          .select("shipment_id")
+          .in_("status", selected_status)
+          .execute()
       )
-      st.success(
-          "This shipment is **"
-          f"{abs(temp_diff):.1f}°C cooler** than the average {shipment_status}"
-          " shipment."
-      )
+      filtered_shipment_ids = [row["shipment_id"] for row in status_resp.data]
 
-    breach_count_same = same_status_data[same_status_data["temperature"] > 8.0][
-        "shipment_id"
-    ].nunique()
-    total_same = len(avg_per_shipment)
-    if total_same > 0:
-      breach_rate = (breach_count_same / total_same) * 100
-      st.info(
-          "**"
-          f"{breach_rate:.1f}%** of {shipment_status} shipments had at least one"
-          " temperature breach (>8°C)."
-      )
+      ts_df_filtered = ts_df[ts_df["shipment_id"].isin(filtered_shipment_ids)]
 
-  st.subheader("Temperature Profile")
-  fig = go.Figure()
+      if len(ts_df_filtered) == 0:
+        st.info(f"No time-series data found for status(es): {', '.join(selected_status)}")
+      else:
+        shipment_ids = ts_df_filtered["shipment_id"].unique()
+        selected_id = st.selectbox("Select Shipment to Analyze", shipment_ids, index=0)
 
-  fig.add_trace(
-      go.Scatter(
-          x=ts_selected["time_minutes"],
-          y=ts_selected["temperature"],
-          mode="lines+markers",
-          name=f"{selected_id} ({shipment_status})",
-          line=dict(color="blue", width=3),
-      )
-  )
+        ts_selected = (
+            ts_df_filtered[ts_df_filtered["shipment_id"] == selected_id]
+            .sort_values("time_minutes")
+        )
 
-  if len(same_status_data) > 0:
-    time_points = ts_selected["time_minutes"].values
-    all_curves = []
-    for sid in avg_per_shipment.index[:10]:
-      curve = (
-          ts_df_filtered[ts_df_filtered["shipment_id"] == sid]
-          .sort_values("time_minutes")["temperature"]
-          .values
-      )
-      if len(curve) == len(time_points):
-        all_curves.append(curve)
-
-    if len(all_curves) > 0:
-      avg_curve = np.mean(all_curves, axis=0)
-      std_curve = np.std(all_curves, axis=0)
-
-      fig.add_trace(
-          go.Scatter(
-              x=time_points,
-              y=avg_curve,
-              mode="lines",
-              name=f"Average ({shipment_status})",
-              line=dict(color="orange", width=2, dash="dash"),
+        if len(ts_selected) == 0:
+          st.warning("No temperature data found for this shipment.")
+        else:
+          status_resp_single = (
+              supabase.table("cold_chain_tracking")
+              .select("status")
+              .eq("shipment_id", selected_id)
+              .execute()
           )
-      )
+          shipment_status = status_resp_single.data[0]["status"]
 
-      fig.add_trace(
-          go.Scatter(
-              x=time_points.tolist() + time_points.tolist()[::-1],
-              y=(avg_curve + std_curve).tolist()
-              + (avg_curve - std_curve).tolist()[::-1],
-              fill="toself",
-              fillcolor="rgba(255, 165, 0, 0.2)",
-              line=dict(color="rgba(255, 255, 255, 0)"),
-              name="+/- 1 Std Dev",
-              showlegend=True,
+          st.subheader("Quick Summary")
+          col1, col2, col3 = st.columns(3)
+          col1.metric("Shipment", selected_id)
+          col2.metric("Status", shipment_status.capitalize())
+          col3.metric("Avg Temp", f"{ts_selected['temperature'].mean():.1f}°C")
+
+          st.subheader("Comparison to Average")
+
+          status_resp_all = (
+              supabase.table("cold_chain_tracking")
+              .select("shipment_id")
+              .eq("status", shipment_status)
+              .execute()
           )
-      )
+          same_status_ids = [row["shipment_id"] for row in status_resp_all.data]
 
-  fig.add_hline(
-      y=8.0,
-      line_dash="dash",
-      line_color="green",
-      annotation_text="Breach Threshold (8°C)",
-  )
-  fig.update_layout(
-      title=f"Temperature Profile: {selected_id} (Status: {shipment_status})",
-      xaxis_title="Time (minutes)",
-      yaxis_title="Temperature (°C)",
-      height=450,
-      hovermode="x unified",
-  )
-  st.plotly_chart(fig, width="stretch")
+          same_status_data = ts_df_filtered[
+              ts_df_filtered["shipment_id"].isin(same_status_ids)
+          ]
 
-  st.subheader("GPS Route (Colored by Temperature)")
+          if len(same_status_data) > 0:
+            avg_per_shipment = same_status_data.groupby("shipment_id")[
+                "temperature"
+            ].mean()
+            status_avg_temp = avg_per_shipment.mean()
+            status_std_temp = avg_per_shipment.std()
+            selected_avg_temp = ts_selected["temperature"].mean()
+            temp_diff = selected_avg_temp - status_avg_temp
 
-  start_point = ts_selected.iloc[0]
-  end_point = ts_selected.iloc[-1]
+            col1, col2, col3 = st.columns(3)
+            col1.metric(f"Status Average ({shipment_status})", f"{status_avg_temp:.1f}°C")
+            col2.metric("Your Shipment", f"{selected_avg_temp:.1f}°C")
 
-  center_lat = ts_selected["latitude"].mean()
-  center_lon = ts_selected["longitude"].mean()
+            if temp_diff > 0:
+              col3.metric("Difference", f"+{temp_diff:.1f}°C", delta="Warmer than average", delta_color="inverse")
+              st.warning(f"This shipment is **{temp_diff:.1f}°C warmer** than the average {shipment_status} shipment.")
+            else:
+              col3.metric("Difference", f"{temp_diff:.1f}°C", delta="Cooler than average", delta_color="normal")
+              st.success(f"This shipment is **{abs(temp_diff):.1f}°C cooler** than the average {shipment_status} shipment.")
 
-  fig_map = px.scatter_map(
-      ts_selected,
-      lat="latitude",
-      lon="longitude",
-      color="temperature",
-      hover_name="time_minutes",
-      hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
-      title=f"Route for {selected_id}",
-      color_continuous_scale="RdYlBu_r",
-      zoom=6,
-      height=450,
-  )
+            breach_count_same = same_status_data[same_status_data["temperature"] > 8.0]["shipment_id"].nunique()
+            total_same = len(avg_per_shipment)
+            if total_same > 0:
+              breach_rate = (breach_count_same / total_same) * 100
+              st.info(f"**{breach_rate:.1f}%** of {shipment_status} shipments had at least one temperature breach (>8°C).")
 
-  fig_map.add_scattermap(
-      lat=[start_point["latitude"]],
-      lon=[start_point["longitude"]],
-      mode="markers",
-      marker=dict(size=14, color="green"),
-      text=["Start"],
-      hoverinfo="text",
-      name="Start",
-  )
+          st.subheader("Temperature Profile")
+          fig = go.Figure()
 
-  fig_map.add_scattermap(
-      lat=[end_point["latitude"]],
-      lon=[end_point["longitude"]],
-      mode="markers",
-      marker=dict(size=14, color="red"),
-      text=["End"],
-      hoverinfo="text",
-      name="End",
-  )
+          fig.add_trace(
+              go.Scatter(
+                  x=ts_selected["time_minutes"],
+                  y=ts_selected["temperature"],
+                  mode="lines+markers",
+                  name=f"{selected_id} ({shipment_status})",
+                  line=dict(color="blue", width=3),
+              )
+          )
 
-  fig_map.update_layout(
-      map_style="open-street-map",
-      map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6),
-  )
-  fig_map.update_traces(marker=dict(size=8))
-  st.plotly_chart(fig_map, width="stretch")
+          if len(same_status_data) > 0:
+            time_points = ts_selected["time_minutes"].values
+            all_curves = []
+            for sid in avg_per_shipment.index[:10]:
+              curve = (
+                  ts_df_filtered[ts_df_filtered["shipment_id"] == sid]
+                  .sort_values("time_minutes")["temperature"]
+                  .values
+              )
+              if len(curve) == len(time_points):
+                all_curves.append(curve)
 
-  breach_df = ts_selected[ts_selected["temperature"] > 8.0]
-  if len(breach_df) > 0:
-    first_breach = breach_df.iloc[0]
-    breach_time = first_breach["time_minutes"]
-    st.warning(
-        f"**Breach Detected**: The selected shipment breached the 8°C threshold "
-        f"at **{breach_time} minutes**.\n"
-        f"- **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}\n"
-        f"- **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop."
-    )
-  else:
-    st.success("No breaches detected for the selected shipment.")
+            if len(all_curves) > 0:
+              avg_curve = np.mean(all_curves, axis=0)
+              std_curve = np.std(all_curves, axis=0)
+
+              fig.add_trace(
+                  go.Scatter(
+                      x=time_points,
+                      y=avg_curve,
+                      mode="lines",
+                      name=f"Average ({shipment_status})",
+                      line=dict(color="orange", width=2, dash="dash"),
+                  )
+              )
+
+              fig.add_trace(
+                  go.Scatter(
+                      x=time_points.tolist() + time_points.tolist()[::-1],
+                      y=(avg_curve + std_curve).tolist()
+                      + (avg_curve - std_curve).tolist()[::-1],
+                      fill="toself",
+                      fillcolor="rgba(255, 165, 0, 0.2)",
+                      line=dict(color="rgba(255, 255, 255, 0)"),
+                      name="+/- 1 Std Dev",
+                      showlegend=True,
+                  )
+              )
+
+          fig.add_hline(
+              y=8.0,
+              line_dash="dash",
+              line_color="green",
+              annotation_text="Breach Threshold (8°C)",
+          )
+          fig.update_layout(
+              title=f"Temperature Profile: {selected_id} (Status: {shipment_status})",
+              xaxis_title="Time (minutes)",
+              yaxis_title="Temperature (°C)",
+              height=450,
+              hovermode="x unified",
+          )
+          st.plotly_chart(fig, width="stretch")
+
+          st.subheader("GPS Route (Colored by Temperature)")
+
+          start_point = ts_selected.iloc[0]
+          end_point = ts_selected.iloc[-1]
+
+          center_lat = ts_selected["latitude"].mean()
+          center_lon = ts_selected["longitude"].mean()
+
+          fig_map = px.scatter_map(
+              ts_selected,
+              lat="latitude",
+              lon="longitude",
+              color="temperature",
+              hover_name="time_minutes",
+              hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+              title=f"Route for {selected_id}",
+              color_continuous_scale="RdYlBu_r",
+              zoom=6,
+              height=450,
+          )
+
+          fig_map.add_scattermap(
+              lat=[start_point["latitude"]],
+              lon=[start_point["longitude"]],
+              mode="markers",
+              marker=dict(size=14, color="green"),
+              text=["Start"],
+              hoverinfo="text",
+              name="Start",
+          )
+
+          fig_map.add_scattermap(
+              lat=[end_point["latitude"]],
+              lon=[end_point["longitude"]],
+              mode="markers",
+              marker=dict(size=14, color="red"),
+              text=["End"],
+              hoverinfo="text",
+              name="End",
+          )
+
+          fig_map.update_layout(
+              map_style="open-street-map",
+              map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6),
+          )
+          fig_map.update_traces(marker=dict(size=8))
+          st.plotly_chart(fig_map, width="stretch")
+
+          breach_df = ts_selected[ts_selected["temperature"] > 8.0]
+          if len(breach_df) > 0:
+            first_breach = breach_df.iloc[0]
+            breach_time = first_breach["time_minutes"]
+            st.warning(
+                f"**Breach Detected**: The selected shipment breached the 8°C threshold "
+                f"at **{breach_time} minutes**.\n"
+                f"- **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}\n"
+                f"- **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop."
+            )
+          else:
+            st.success("No breaches detected for the selected shipment.")
 
 # =============================================
 # TAB 5: INTERMODAL WHAT-IF SIMULATOR
