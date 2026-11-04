@@ -252,12 +252,11 @@ with tab1:
         .head(5)
     )
 
-    st.dataframe(
-        corridor_df.style.format(
-            {"avg_transit_hours": "{:.1f} hrs", "avg_distance_km": "{:.1f} km"}
-        ),
-        width="stretch",
-    )
+    # Clean formatting mapped directly to dataframe to avoid styler mapping bugs
+    corridor_df["avg_transit_hours"] = corridor_df["avg_transit_hours"].map("{:.1f} hrs".format)
+    corridor_df["avg_distance_km"] = corridor_df["avg_distance_km"].map("{:.1f} km".format)
+
+    st.dataframe(corridor_df, width="stretch")
 
   st.divider()
 
@@ -284,12 +283,9 @@ with tab1:
 
     with col_a:
       st.markdown("**Top 5 Highest Cost Corridors (Avg ZAR)**")
-      st.dataframe(
-          cost_df.style.format(
-              {"avg_cost_zar": "R{:,.2f}", "avg_transit_h": "{:.1f} hrs"}
-          ),
-          width="stretch",
-      )
+      cost_df["avg_cost_zar"] = cost_df["avg_cost_zar"].map("R{:,.2f}".format)
+      cost_df["avg_transit_h"] = cost_df["avg_transit_h"].map("{:.1f} hrs".format)
+      st.dataframe(cost_df, width="stretch")
 
     with col_b:
       plot_data = filtered_df_ready.copy()
