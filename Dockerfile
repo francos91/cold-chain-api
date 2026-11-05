@@ -12,9 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY Backend/main.py .
 
-# Copy ML models safely from the root
-COPY advanced_model.pkl .
-COPY le_route.pkl .
+# Copy ML models from the dashboard folder where they actually live
+COPY dashboard/advanced_model.pkl .
+COPY dashboard/le_route.pkl .
 
 EXPOSE 10000
 
