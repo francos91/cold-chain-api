@@ -109,46 +109,52 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 y=ts_selected["temperature"],
                 mode="lines+markers",
                 name=f"{selected_id} ({selected_status})",
-                line=dict(color="blue", width=3)
+                line=dict(color="#1f77b4", width=3)
             ))
 
             # 2. Average curve & Standard Deviation cloud ribbon
             if len(same_status_data) > 0:
+                # Group by time_minutes across all shipments of this status
+                status_time_agg = (
+                    same_status_data.groupby("time_minutes")["temperature"]
+                    .agg(["mean", "std"])
+                    .reindex(ts_selected["time_minutes"])
+                    .interpolate(method="linear")
+                    .bfill()
+                    .ffill()
+                )
+
+                avg_curve = status_time_agg["mean"].values
+                fallback_std = status_std_temp if pd.notnull(status_std_temp) and status_std_temp > 0 else 1.2
+                std_curve = status_time_agg["std"].fillna(fallback_std).values
                 time_points = ts_selected["time_minutes"].values
-                all_curves = []
-                for sid in avg_per_shipment.index[:10]:
-                    curve = ts_df_filtered[ts_df_filtered["shipment_id"] == sid].sort_values("time_minutes")["temperature"].values
-                    if len(curve) == len(time_points):
-                        all_curves.append(curve)
 
-                if len(all_curves) > 0:
-                    avg_curve = np.mean(all_curves, axis=0)
-                    std_curve = np.std(all_curves, axis=0)
+                # Average baseline line
+                fig.add_trace(go.Scatter(
+                    x=time_points,
+                    y=avg_curve,
+                    mode="lines",
+                    name=f"Average ({selected_status})",
+                    line=dict(color="#ff7f0e", width=2, dash="dash")
+                ))
 
-                    # Average line
-                    fig.add_trace(go.Scatter(
-                        x=time_points,
-                        y=avg_curve,
-                        mode="lines",
-                        name=f"Average ({selected_status})",
-                        line=dict(color="orange", width=2, dash="dash")
-                    ))
+                # Standard Deviation Cloud (Upper bound forward, Lower bound backward)
+                fig.add_trace(go.Scatter(
+                    x=time_points.tolist() + time_points.tolist()[::-1],
+                    y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
+                    fill="toself",
+                    fillcolor="rgba(255, 127, 14, 0.18)",
+                    line=dict(color="rgba(255, 255, 255, 0)", width=0),
+                    name="+/- 1 Std Dev",
+                    hoverinfo="skip",
+                    showlegend=True
+                ))
 
-                    # Std Dev Cloud (Fill ribbon)
-                    fig.add_trace(go.Scatter(
-                        x=time_points.tolist() + time_points.tolist()[::-1],
-                        y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
-                        fill="toself",
-                        fillcolor="rgba(255, 165, 0, 0.2)",
-                        line=dict(color="rgba(255, 255, 255, 0)"),
-                        name="+/- 1 Std Dev",
-                        showlegend=True
-                    ))
-
+            # Breach threshold line
             fig.add_hline(
                 y=8.0,
                 line_dash="dash",
-                line_color="green",
+                line_color="#2ca02c",
                 annotation_text="Breach Threshold (8°C)"
             )
             fig.update_layout(
@@ -184,7 +190,7 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 lat=[start_point["latitude"]],
                 lon=[start_point["longitude"]],
                 mode="markers",
-                marker=dict(size=14, color="green"),
+                marker=dict(size=14, color="#2ca02c"),
                 text=["Start"],
                 hoverinfo="text",
                 name="Start"
@@ -195,7 +201,7 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 lat=[end_point["latitude"]],
                 lon=[end_point["longitude"]],
                 mode="markers",
-                marker=dict(size=14, color="red"),
+                marker=dict(size=14, color="#d62728"),
                 text=["End"],
                 hoverinfo="text",
                 name="End"
