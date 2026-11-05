@@ -55,7 +55,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
     if ts_df.empty:
         st.warning("No time-series data found.")
     else:
-        # Filter available shipments by status
         available_ids = filtered_df["shipment_id"].unique()
         ts_df_filtered = ts_df[ts_df["shipment_id"].isin(available_ids)]
 
@@ -89,17 +88,31 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
 
                 if temp_diff > 0:
                     col3.metric("Difference", f"+{temp_diff:.1f}°C", delta="Warmer than average", delta_color="inverse")
+                    st.warning(f"This shipment is **{temp_diff:.1f}°C warmer** than the average {selected_status} shipment.")
                 else:
                     col3.metric("Difference", f"{temp_diff:.1f}°C", delta="Cooler than average", delta_color="normal")
+                    st.success(f"This shipment is **{abs(temp_diff):.1f}°C cooler** than the average {selected_status} shipment.")
 
-            # Chart
+                breach_count_same = same_status_data[same_status_data["temperature"] > 8.0]["shipment_id"].nunique()
+                total_same = len(avg_per_shipment)
+                if total_same > 0:
+                    breach_rate = (breach_count_same / total_same) * 100
+                    st.info(f"**{breach_rate:.1f}%** of {selected_status} shipments had at least one temperature breach (>8°C).")
+
+            # --- TEMPERATURE PROFILE PLOT ---
             st.subheader("Temperature Profile")
             fig = go.Figure()
+
+            # 1. Selected shipment trace
             fig.add_trace(go.Scatter(
-                x=ts_selected["time_minutes"], y=ts_selected["temperature"],
-                mode="lines+markers", name=f"{selected_id}", line=dict(color="blue", width=3)
+                x=ts_selected["time_minutes"],
+                y=ts_selected["temperature"],
+                mode="lines+markers",
+                name=f"{selected_id} ({selected_status})",
+                line=dict(color="blue", width=3)
             ))
 
+            # 2. Average curve & Standard Deviation cloud ribbon
             if len(same_status_data) > 0:
                 time_points = ts_selected["time_minutes"].values
                 all_curves = []
@@ -111,22 +124,100 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 if len(all_curves) > 0:
                     avg_curve = np.mean(all_curves, axis=0)
                     std_curve = np.std(all_curves, axis=0)
+
+                    # Average line
                     fig.add_trace(go.Scatter(
-                        x=time_points, y=avg_curve, mode="lines",
-                        name=f"Average", line=dict(color="orange", width=2, dash="dash")
+                        x=time_points,
+                        y=avg_curve,
+                        mode="lines",
+                        name=f"Average ({selected_status})",
+                        line=dict(color="orange", width=2, dash="dash")
                     ))
 
-            fig.add_hline(y=8.0, line_dash="dash", line_color="green", annotation_text="Breach Threshold (8°C)")
-            fig.update_layout(height=450, hovermode="x unified", xaxis_title="Time (min)", yaxis_title="Temp (°C)")
+                    # Std Dev Cloud (Fill ribbon)
+                    fig.add_trace(go.Scatter(
+                        x=time_points.tolist() + time_points.tolist()[::-1],
+                        y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
+                        fill="toself",
+                        fillcolor="rgba(255, 165, 0, 0.2)",
+                        line=dict(color="rgba(255, 255, 255, 0)"),
+                        name="+/- 1 Std Dev",
+                        showlegend=True
+                    ))
+
+            fig.add_hline(
+                y=8.0,
+                line_dash="dash",
+                line_color="green",
+                annotation_text="Breach Threshold (8°C)"
+            )
+            fig.update_layout(
+                title=f"Temperature Profile: {selected_id} (Status: {selected_status})",
+                xaxis_title="Time (minutes)",
+                yaxis_title="Temperature (°C)",
+                height=450,
+                hovermode="x unified"
+            )
             st.plotly_chart(fig, width="stretch")
 
-            # Map
+            # --- GPS ROUTE MAP ---
             st.subheader("GPS Route (Colored by Temperature)")
+            start_point = ts_selected.iloc[0]
+            end_point = ts_selected.iloc[-1]
             center_lat, center_lon = ts_selected["latitude"].mean(), ts_selected["longitude"].mean()
             
             fig_map = px.scatter_map(
-                ts_selected, lat="latitude", lon="longitude", color="temperature",
-                hover_name="time_minutes", color_continuous_scale="RdYlBu_r", zoom=6, height=450
+                ts_selected,
+                lat="latitude",
+                lon="longitude",
+                color="temperature",
+                hover_name="time_minutes",
+                hover_data={"temperature": ":.1f°C", "time_minutes": "min"},
+                title=f"Route for {selected_id}",
+                color_continuous_scale="RdYlBu_r",
+                zoom=6,
+                height=450
             )
-            fig_map.update_layout(map_style="open-street-map", map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6))
+
+            # Start marker (Green)
+            fig_map.add_scattermap(
+                lat=[start_point["latitude"]],
+                lon=[start_point["longitude"]],
+                mode="markers",
+                marker=dict(size=14, color="green"),
+                text=["Start"],
+                hoverinfo="text",
+                name="Start"
+            )
+
+            # End marker (Red)
+            fig_map.add_scattermap(
+                lat=[end_point["latitude"]],
+                lon=[end_point["longitude"]],
+                mode="markers",
+                marker=dict(size=14, color="red"),
+                text=["End"],
+                hoverinfo="text",
+                name="End"
+            )
+
+            fig_map.update_layout(
+                map_style="open-street-map",
+                map=dict(center=dict(lat=center_lat, lon=center_lon), zoom=6)
+            )
+            fig_map.update_traces(marker=dict(size=8))
             st.plotly_chart(fig_map, width="stretch")
+
+            # Breach notice
+            breach_df = ts_selected[ts_selected["temperature"] > 8.0]
+            if len(breach_df) > 0:
+                first_breach = breach_df.iloc[0]
+                breach_time = first_breach["time_minutes"]
+                st.warning(
+                    f"**Breach Detected**: The selected shipment breached the 8°C threshold "
+                    f"at **{breach_time} minutes**.\n"
+                    f"- **Location**: Latitude {first_breach['latitude']:.4f}, Longitude {first_breach['longitude']:.4f}\n"
+                    f"- **Recommendation**: Check if this location corresponds to a known traffic bottleneck or delivery stop."
+                )
+            else:
+                st.success("No breaches detected for the selected shipment.")
