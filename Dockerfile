@@ -6,11 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Pointing directly to the root files instead of the backend folder
-COPY requirements.txt .
+# Use capital B to match your GitHub folder
+COPY Backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY Backend/main.py .
 
 EXPOSE 10000
 
