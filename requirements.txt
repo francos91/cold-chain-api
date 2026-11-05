@@ -2,3 +2,8 @@ fastapi
 uvicorn
 supabase
 pydantic
+streamlit
+pandas
+plotly
+requests
+
