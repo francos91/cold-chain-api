@@ -299,7 +299,6 @@ with tab1:
       )
 
     with col_b:
-      # FIXED: Normalized status to lowercase and sampled randomly to ensure delayed and in-transit points are visible
       plot_data = filtered_df_ready.copy()
       plot_data["status_lower"] = plot_data["status"].str.lower()
       sample_df = plot_data.sample(n=min(500, len(plot_data)), random_state=42)
@@ -334,7 +333,7 @@ with tab1:
   DIESEL_EMISSION_FACTOR = 73.2
   GRID_BEV_EMISSION_FACTOR = 156.8
   SOLAR_BEV_EMISSION_FACTOR = 6.4
-  CARBON_TAX_RATE = 28.0  # Corrected South African effective rate
+  CARBON_TAX_RATE = 28.0
 
   if (
       not filtered_df_ready.empty
@@ -409,7 +408,6 @@ with tab2:
   st.subheader("Logistics Data Table")
   st.caption(f"Displaying rows for status: **{', '.join(selected_status)}**")
   
-  # MOBILE FIX: Limit rows to 500 so the browser doesn't crash
   st.dataframe(
       filtered_df.head(500), 
       width="stretch",
@@ -431,7 +429,6 @@ with tab3:
 
   @st.fragment
   def render_risk_fragment(data):
-      # FIXED: .copy() prevents SettingWithCopyWarning on data["predicted_risk"]
       data = data.copy()
 
       threshold_pct = st.slider(
@@ -569,7 +566,6 @@ with tab3:
             f"No active high-risk shipments at the **{threshold_pct}%** threshold!"
         )
 
-  # Call the fragment function
   render_risk_fragment(filtered_df_ready)
 
   st.markdown("### High-Risk Routes Analysis")
@@ -600,7 +596,6 @@ with tab4:
   )
   st.caption(f"Active Status Filter: **{', '.join(selected_status)}**")
 
-  # MOBILE FIX: Lazy-load the 66,000 rows and the heavy GPS map
   if "thermal_loaded" not in st.session_state:
     st.session_state.thermal_loaded = False
 
@@ -672,7 +667,6 @@ with tab4:
                 "temperature"
             ].mean()
             status_avg_temp = avg_per_shipment.mean()
-            status_std_temp = avg_per_shipment.std()
             selected_avg_temp = ts_selected["temperature"].mean()
             temp_diff = selected_avg_temp - status_avg_temp
 
@@ -693,62 +687,64 @@ with tab4:
               breach_rate = (breach_count_same / total_same) * 100
               st.info(f"**{breach_rate:.1f}%** of {shipment_status} shipments had at least one temperature breach (>8°C).")
 
+          # --- TEMPERATURE PROFILE PLOT ---
           st.subheader("Temperature Profile")
           fig = go.Figure()
 
+          # 1. Selected shipment line
           fig.add_trace(
               go.Scatter(
                   x=ts_selected["time_minutes"],
                   y=ts_selected["temperature"],
                   mode="lines+markers",
                   name=f"{selected_id} ({shipment_status})",
-                  line=dict(color="blue", width=3),
+                  line=dict(color="#1f77b4", width=3),
               )
           )
 
+          # 2. Continuous Average & Calibrated Operating Tolerance Band (+/- 1.5°C)
           if len(same_status_data) > 0:
+            status_time_agg = (
+                same_status_data.groupby("time_minutes")["temperature"]
+                .mean()
+                .reindex(ts_selected["time_minutes"])
+                .interpolate(method="linear")
+                .bfill()
+                .ffill()
+            )
+
+            avg_curve = status_time_agg.values
+            upper_bound = avg_curve + 1.5
+            lower_bound = np.maximum(avg_curve - 1.5, 0.0)
             time_points = ts_selected["time_minutes"].values
-            all_curves = []
-            for sid in avg_per_shipment.index[:10]:
-              curve = (
-                  ts_df_filtered[ts_df_filtered["shipment_id"] == sid]
-                  .sort_values("time_minutes")["temperature"]
-                  .values
-              )
-              if len(curve) == len(time_points):
-                all_curves.append(curve)
 
-            if len(all_curves) > 0:
-              avg_curve = np.mean(all_curves, axis=0)
-              std_curve = np.std(all_curves, axis=0)
+            fig.add_trace(
+                go.Scatter(
+                    x=time_points,
+                    y=avg_curve,
+                    mode="lines",
+                    name=f"Average ({shipment_status})",
+                    line=dict(color="#ff7f0e", width=2, dash="dash"),
+                )
+            )
 
-              fig.add_trace(
-                  go.Scatter(
-                      x=time_points,
-                      y=avg_curve,
-                      mode="lines",
-                      name=f"Average ({shipment_status})",
-                      line=dict(color="orange", width=2, dash="dash"),
-                  )
-              )
-
-              fig.add_trace(
-                  go.Scatter(
-                      x=time_points.tolist() + time_points.tolist()[::-1],
-                      y=(avg_curve + std_curve).tolist()
-                      + (avg_curve - std_curve).tolist()[::-1],
-                      fill="toself",
-                      fillcolor="rgba(255, 165, 0, 0.2)",
-                      line=dict(color="rgba(255, 255, 255, 0)"),
-                      name="+/- 1 Std Dev",
-                      showlegend=True,
-                  )
-              )
+            fig.add_trace(
+                go.Scatter(
+                    x=time_points.tolist() + time_points.tolist()[::-1],
+                    y=upper_bound.tolist() + lower_bound.tolist()[::-1],
+                    fill="toself",
+                    fillcolor="rgba(255, 127, 14, 0.18)",
+                    line=dict(color="rgba(255, 255, 255, 0)", width=0),
+                    name="Operating Tolerance (+/- 1.5°C)",
+                    hoverinfo="skip",
+                    showlegend=True,
+                )
+            )
 
           fig.add_hline(
               y=8.0,
               line_dash="dash",
-              line_color="green",
+              line_color="#2ca02c",
               annotation_text="Breach Threshold (8°C)",
           )
           fig.update_layout(
@@ -760,6 +756,7 @@ with tab4:
           )
           st.plotly_chart(fig, width="stretch")
 
+          # --- GPS ROUTE MAP ---
           st.subheader("GPS Route (Colored by Temperature)")
 
           start_point = ts_selected.iloc[0]
@@ -785,7 +782,7 @@ with tab4:
               lat=[start_point["latitude"]],
               lon=[start_point["longitude"]],
               mode="markers",
-              marker=dict(size=14, color="green"),
+              marker=dict(size=14, color="#2ca02c"),
               text=["Start"],
               hoverinfo="text",
               name="Start",
@@ -795,7 +792,7 @@ with tab4:
               lat=[end_point["latitude"]],
               lon=[end_point["longitude"]],
               mode="markers",
-              marker=dict(size=14, color="red"),
+              marker=dict(size=14, color="#d62728"),
               text=["End"],
               hoverinfo="text",
               name="End",
@@ -877,7 +874,7 @@ with tab5:
       ) / 1_000_000
 
       carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
-      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Corrected South African effective rate
+      carbon_tax_savings_zar = carbon_savings_tonnes * 28.0
 
       avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
       avg_rail_hours = (
@@ -926,7 +923,6 @@ with tab5:
           ],
           f"Simulated ({shift_percentage}% Rail)": [
               new_emissions_tonnes,
-              # FIXED: cost now scales smoothly from 100% (0% rail) to 92% (100% rail)
               baseline_cost * (1 - (shift_percentage / 100.0) * 0.08),
               avg_road_hours
               + ((shift_percentage / 100.0) * max(0, transit_time_delta_hrs)),
