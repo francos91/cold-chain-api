@@ -138,3 +138,11 @@ South Africa-Specific Literature Sources:
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets (Master's Research Proposal core objective).
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
 
+## License
+This project and its accompanying simulation datasets, models, and architecture are licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)**. 
+
+To view a copy of this license, visit [Creative Commons BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+
+Under this license:
+- You are free to view, share, and adapt this work for academic, educational, or non-commercial research purposes.
+- Commercial exploitation, resale, or closed-source redistribution without prior written consent from the author is strictly prohibited.
