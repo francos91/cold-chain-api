@@ -1,12 +1,17 @@
-
-
 # Cold Chain Logistics Transport Intelligence Dashboard
 [![Cold Chain Logistics CI/CD](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml/badge.svg)](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml)
 
 A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
 
-## Live Demo
-The dashboard is deployed at: https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/
+## Live Demos (Parallel Deployment)
+- **V1 (Legacy Dashboard):** [Streamlit Cloud (Direct DB)](https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/)
+- **V2 (API-Driven Dashboard):** [Streamlit Cloud (Microservice Client)](https://cold-chain-api-xsceu8pzmbemnpx4kiqd9t.streamlit.app/)
+
+## Microservices & Docker Architecture (V2 Upgrade)
+The system has been upgraded from a monolithic structure to a decoupled microservices architecture:
+- **Backend API (Docker + Render):** The core logic is containerized using a custom `Dockerfile` (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, safely loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`) from the `dashboard/` directory and executing heavy calculations.
+- **Frontend Client (`Overview.py`):** The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex queries. Instead, it fetches pre-processed datasets and metrics directly from the Dockerized FastAPI backend.
+- **Parallel Hosting:** Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards are hosted concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
 
 ## Project Overview
 This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
@@ -124,11 +129,12 @@ South Africa-Specific Literature Sources:
 - [x] Add an Intermodal Mode-Switching "What-If" simulation tool to evaluate the impact of shifting freight from road to rail or electric corridors.
 - [x] Optimize frontend dashboard performance using `@st.fragment` for instantaneous widget rendering and cached temperature streams.
 - [x] Resolve scatter plot status color-mapping and master shipment table pagination constraints.
+- [x] Implement parallel microservice architecture with Render Docker backend and decoupled V2 Streamlit UI.
+- [x] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Integrate real-time weather API data to correlate external temperature fluctuations with internal cargo excursions.
 - [ ] Implement automated email/SMS alerts when a temperature breach (excursion) is detected.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
 - [ ] Extend the Random Forest model with XGBoost or LightGBM to improve prediction accuracy.
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets (Master's Research Proposal core objective).
-- [ ] Deploy the model as a separate microservice (via Render) to allow external apps to request predictions via API.
 - [ ] Add SHAP (SHapley Additive exPlanations) model interpretability to explain why specific shipments are flagged as high-risk.
-```
+
