@@ -31,5 +31,8 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Run Unit Tests with Pytest
+      env:
+        SUPABASE_URL: "https://mock-supabase-url.supabase.co"
+        SUPABASE_KEY: "mock-supabase-key-for-ci"
       run: |
         pytest tests/
