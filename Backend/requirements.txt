@@ -2,3 +2,8 @@ fastapi
 uvicorn
 supabase
 pydantic
+pandas
+numpy
+scikit-learn
+joblib
+
