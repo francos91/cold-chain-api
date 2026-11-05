@@ -12,7 +12,7 @@ from supabase import Client, create_client
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("logistics-api")
 
-app = FastAPI(title="Logistics Data Pipeline API", version="1.2.0")
+app = FastAPI(title="Logistics Data Pipeline API", version="1.3.0")
 
 # Secure environment initialization
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -49,6 +49,38 @@ class ShipmentResponse(ShipmentCreate):
     logged_at: str
 
 
+class IntermodalRequest(BaseModel):
+    corridor_key: str
+    shift_percentage: float
+    total_tkm: float
+    total_shipments: int
+
+
+# Reference Database for Simulator
+INTERMODAL_CORRIDOR_DATA = {
+    "Johannesburg_to_Durban (Natcor)": {
+        "road_distance_km": 568,
+        "rail_distance_km": 714,
+        "road_emission_factor": 73.2,
+        "rail_emission_factor": 12.2,
+        "road_cost_per_km": 18.00,
+        "rail_cost_per_km": 11.50,
+        "avg_road_speed_kmh": 65.0,
+        "avg_rail_speed_kmh": 35.0,
+    },
+    "Johannesburg_to_Cape_Town (Capecor)": {
+        "road_distance_km": 1398,
+        "rail_distance_km": 1532,
+        "road_emission_factor": 73.2,
+        "rail_emission_factor": 12.2,
+        "road_cost_per_km": 18.00,
+        "rail_cost_per_km": 11.50,
+        "avg_road_speed_kmh": 68.0,
+        "avg_rail_speed_kmh": 40.0,
+    },
+}
+
+
 @app.get("/", tags=["System"])
 def home():
     return {"status": "online", "message": "Logistics API Pipeline is active."}
@@ -56,7 +88,6 @@ def home():
 
 @app.get("/health", tags=["System"])
 def health():
-    """Liveness probe that actually touches Supabase."""
     try:
         supabase.table("cold_chain_tracking").select("id").limit(1).execute()
         return {"status": "ok", "db": "reachable"}
@@ -65,14 +96,9 @@ def health():
         raise HTTPException(status_code=503, detail="Database unreachable")
 
 
-@app.post(
-    "/shipments/",
-    response_model=List[ShipmentResponse],
-    tags=["Shipments"],
-)
+@app.post("/shipments/", response_model=List[ShipmentResponse], tags=["Shipments"])
 def create_shipment(shipment: ShipmentCreate):
     try:
-        # exclude_none prevents null values overwriting DB defaults
         payload = shipment.model_dump(exclude_unset=True, exclude_none=True)
         response = supabase.table("cold_chain_tracking").insert(payload).execute()
         return response.data
@@ -81,19 +107,12 @@ def create_shipment(shipment: ShipmentCreate):
         raise HTTPException(status_code=500, detail="Insert failed")
 
 
-@app.post(
-    "/shipments/bulk/",
-    response_model=List[ShipmentResponse],
-    tags=["Shipments"],
-)
+@app.post("/shipments/bulk/", response_model=List[ShipmentResponse], tags=["Shipments"])
 def create_shipments_bulk(shipments: List[ShipmentCreate]):
-    """Bulk insert — used by the synthetic data feeder (4,500 rows)."""
     if not shipments:
         return []
     try:
-        payload = [
-            s.model_dump(exclude_unset=True, exclude_none=True) for s in shipments
-        ]
+        payload = [s.model_dump(exclude_unset=True, exclude_none=True) for s in shipments]
         response = supabase.table("cold_chain_tracking").insert(payload).execute()
         return response.data
     except Exception:
@@ -101,24 +120,10 @@ def create_shipments_bulk(shipments: List[ShipmentCreate]):
         raise HTTPException(status_code=500, detail="Bulk insert failed")
 
 
-@app.get(
-    "/shipments/",
-    response_model=List[ShipmentResponse],
-    tags=["Shipments"],
-)
-def get_all_shipments(
-    limit: int = Query(1000, ge=1, le=10000),
-    offset: int = Query(0, ge=0),
-):
-    """Paginated read. Supabase caps a single response at 1000 rows, so
-    callers must page through with limit/offset to retrieve everything."""
+@app.get("/shipments/", response_model=List[ShipmentResponse], tags=["Shipments"])
+def get_all_shipments(limit: int = Query(1000, ge=1, le=10000), offset: int = Query(0, ge=0)):
     try:
-        response = (
-            supabase.table("cold_chain_tracking")
-            .select("*")
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
+        response = supabase.table("cold_chain_tracking").select("*").range(offset, offset + limit - 1).execute()
         return response.data
     except Exception:
         logger.exception("fetch failed (offset=%d, limit=%d)", offset, limit)
@@ -127,16 +132,13 @@ def get_all_shipments(
 
 @app.get("/api/dashboard", tags=["Dashboard"])
 def get_dashboard_data():
-    """Fetches raw data, runs ML predictions, and returns ready-to-use JSON."""
     try:
-        # 1. Fetch raw data from Supabase
         response = supabase.table("cold_chain_tracking").select("*").execute()
         if not response.data:
             return {"raw": [], "features": []}
         
         df_feat = pd.DataFrame(response.data)
         
-        # 2. Feature Engineering
         df_feat["route"] = df_feat["origin"] + "_to_" + df_feat["destination"]
         risk_map = df_feat.groupby("route")["temperature_celsius"].apply(lambda x: (x > 8.0).mean()).to_dict()
         df_feat["route_risk_score"] = df_feat["route"].map(risk_map)
@@ -166,14 +168,12 @@ def get_dashboard_data():
         df_feat["is_perfect"] = ((df_feat["is_ontime"] == 1) & (df_feat["is_compliant"] == 1)).astype(int)
         df_feat["cost_per_shipment"] = (df_feat["distance_km"] * 18) + 200
 
-        # 3. ML Inference
         X_pred = df_feat[["route_enc", "route_risk_score", "is_delayed", "distance_km", "transit_time_hours"]]
         if not X_pred.empty and model is not None:
             df_feat["risk_probability"] = model.predict_proba(X_pred)[:, 1]
         else:
             df_feat["risk_probability"] = 0.0
 
-        # Return as JSON (convert NaN/Infinity values to handle JSON serialization properly)
         df_feat = df_feat.fillna(0)
         
         return {
@@ -183,3 +183,53 @@ def get_dashboard_data():
     except Exception as e:
         logger.exception("Failed to generate dashboard data payload")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/telemetry", tags=["Dashboard"])
+def get_telemetry(shipment_id: Optional[str] = None):
+    """Fetches GPS and temperature stream data, optionally filtered by shipment."""
+    try:
+        query = supabase.table("temperature_stream").select("*")
+        if shipment_id:
+            query = query.eq("shipment_id", shipment_id)
+        response = query.execute()
+        return response.data
+    except Exception as e:
+        logger.exception("Failed to fetch telemetry")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/simulate-intermodal", tags=["Dashboard"])
+def simulate_intermodal(request: IntermodalRequest):
+    """Calculates road-to-rail modal shift carbon and cost metrics."""
+    if request.corridor_key not in INTERMODAL_CORRIDOR_DATA:
+        raise HTTPException(status_code=404, detail="Corridor not found")
+        
+    params = INTERMODAL_CORRIDOR_DATA[request.corridor_key]
+    
+    baseline_emissions_tonnes = (request.total_tkm * params["road_emission_factor"]) / 1_000_000
+    baseline_cost = (request.total_tkm * (params["road_cost_per_km"] / 50.0)) + (request.total_shipments * 2500)
+    
+    rail_tkm = request.total_tkm * (request.shift_percentage / 100.0)
+    remaining_road_tkm = request.total_tkm * (1 - (request.shift_percentage / 100.0))
+    
+    new_emissions_tonnes = ((remaining_road_tkm * params["road_emission_factor"]) + (rail_tkm * params["rail_emission_factor"])) / 1_000_000
+    
+    carbon_savings_tonnes = baseline_emissions_tonnes - new_emissions_tonnes
+    carbon_tax_savings_zar = carbon_savings_tonnes * 28.0  # Effective SA rate
+    
+    avg_road_hours = params["road_distance_km"] / params["avg_road_speed_kmh"]
+    avg_rail_hours = (params["rail_distance_km"] / params["avg_rail_speed_kmh"]) + 18.0
+    transit_time_delta_hrs = (request.shift_percentage / 100.0) * (avg_rail_hours - avg_road_hours)
+    
+    return {
+        "carbon_savings_tonnes": carbon_savings_tonnes,
+        "carbon_tax_savings_zar": carbon_tax_savings_zar,
+        "baseline_emissions_tonnes": baseline_emissions_tonnes,
+        "new_emissions_tonnes": new_emissions_tonnes,
+        "baseline_cost": baseline_cost,
+        "new_cost": baseline_cost * (1 - (request.shift_percentage / 100.0) * 0.08),
+        "avg_road_hours": avg_road_hours,
+        "new_transit_hours": avg_road_hours + ((request.shift_percentage / 100.0) * max(0, transit_time_delta_hrs)),
+        "transit_time_delta_hrs": transit_time_delta_hrs
+    }
