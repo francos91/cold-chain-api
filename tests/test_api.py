@@ -1,10 +1,14 @@
-import sys
 import os
-from fastapi.testclient import TestClient
+import sys
 
-# Add the Backend folder to Python's path so TestClient can import app from main.py
+# 1. Set mock environment variables BEFORE importing main.py so validation passes
+os.environ.setdefault("SUPABASE_URL", "https://mock-supabase-url.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "mock-supabase-key-for-testing")
+
+# 2. Add the Backend folder to Python's path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../Backend")))
 
+from fastapi.testclient import TestClient
 from main import app
 
 client = TestClient(app)
@@ -20,7 +24,7 @@ def test_root_endpoint():
 def test_health_check_endpoint():
     """Test the database liveness probe."""
     response = client.get("/health")
-    # Will return 200 if Supabase is reachable, or 503 if offline/credentials are missing in local test env
+    # With mock credentials, Supabase will be unreachable, returning 503 (which proves the liveness probe works)
     assert response.status_code in [200, 503]
 
 def test_simulate_intermodal_endpoint():
