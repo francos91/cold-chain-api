@@ -78,7 +78,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
             if len(same_status_data) > 0:
                 avg_per_shipment = same_status_data.groupby("shipment_id")["temperature"].mean()
                 status_avg_temp = avg_per_shipment.mean()
-                status_std_temp = avg_per_shipment.std()
                 selected_avg_temp = ts_selected["temperature"].mean()
                 temp_diff = selected_avg_temp - status_avg_temp
 
@@ -112,21 +111,21 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 line=dict(color="#1f77b4", width=3)
             ))
 
-            # 2. Average curve & Standard Deviation cloud ribbon
+            # 2. Average curve & Realistic Safe Operating Tolerance Band (+/- 1.5°C)
             if len(same_status_data) > 0:
-                # Group by time_minutes across all shipments of this status
                 status_time_agg = (
                     same_status_data.groupby("time_minutes")["temperature"]
-                    .agg(["mean", "std"])
+                    .mean()
                     .reindex(ts_selected["time_minutes"])
                     .interpolate(method="linear")
                     .bfill()
                     .ffill()
                 )
 
-                avg_curve = status_time_agg["mean"].values
-                fallback_std = status_std_temp if pd.notnull(status_std_temp) and status_std_temp > 0 else 1.2
-                std_curve = status_time_agg["std"].fillna(fallback_std).values
+                avg_curve = status_time_agg.values
+                # Standard reefer thermostat operating tolerance (+/- 1.5°C), clamped at 0°C minimum
+                upper_bound = avg_curve + 1.5
+                lower_bound = np.maximum(avg_curve - 1.5, 0.0)
                 time_points = ts_selected["time_minutes"].values
 
                 # Average baseline line
@@ -138,14 +137,14 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                     line=dict(color="#ff7f0e", width=2, dash="dash")
                 ))
 
-                # Standard Deviation Cloud (Upper bound forward, Lower bound backward)
+                # Safe Operating Tolerance Band (Filled corridor)
                 fig.add_trace(go.Scatter(
                     x=time_points.tolist() + time_points.tolist()[::-1],
-                    y=(avg_curve + std_curve).tolist() + (avg_curve - std_curve).tolist()[::-1],
+                    y=upper_bound.tolist() + lower_bound.tolist()[::-1],
                     fill="toself",
                     fillcolor="rgba(255, 127, 14, 0.18)",
                     line=dict(color="rgba(255, 255, 255, 0)", width=0),
-                    name="+/- 1 Std Dev",
+                    name="Operating Tolerance (+/- 1.5°C)",
                     hoverinfo="skip",
                     showlegend=True
                 ))
