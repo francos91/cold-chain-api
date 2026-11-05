@@ -8,7 +8,7 @@ st.set_page_config(page_title="Logistics Overview", layout="wide")
 st.title("Cold Chain Logistics Overview")
 st.sidebar.success("Select a tool above to navigate.")
 
-# 2. API Connection (Supabase is completely gone!)
+# 2. API Connection (No Supabase!)
 API_URL = "https://cold-chain-api-docker.onrender.com/api/dashboard"
 
 @st.cache_data(ttl=600)
@@ -51,7 +51,7 @@ tab1, tab2 = st.tabs(["Overview", "Raw Data"])
 
 with tab1:
   st.subheader("SCOR-Aligned Performance Overview")
-  st.caption(f"Active Status Filter: **{', '.join(selected_status)}**")
+  st.caption(f"Active Status Filter: **{', '.join(selected_status)}** | Total Rows in View: **{len(filtered_df_ready):,}**")
 
   col1, col2, col3, col4, col5 = st.columns(5)
   perfect_rate = filtered_df_ready["is_perfect"].mean() * 100
@@ -115,8 +115,61 @@ with tab1:
             y="cost_per_shipment",
             color="status_lower",
             title="Shipment Cost vs. Distance Physics",
+            color_discrete_map={"delivered": "#008080", "delayed": "#FF4B4B", "in-transit": "#FFA500"}
         )
         st.plotly_chart(fig_cost, width="stretch")
+
+  st.divider()
+
+  # ADDED BACK: Carbon Emissions Section
+  st.subheader("Carbon Emissions & Financial Exposure (SCOR Cost-to-Serve)")
+  st.markdown("Quantifying environmental impact and carbon tax liability using ISO 14083 activity-based modelling.")
+
+  DIESEL_EMISSION_FACTOR = 73.2
+  GRID_BEV_EMISSION_FACTOR = 156.8
+  SOLAR_BEV_EMISSION_FACTOR = 6.4
+  CARBON_TAX_RATE = 28.0  
+
+  if not filtered_df_ready.empty and "distance_km" in filtered_df_ready.columns and "weight_tonnes" in filtered_df_ready.columns:
+    filtered_df_ready["tkm"] = filtered_df_ready["distance_km"] * filtered_df_ready["weight_tonnes"]
+    total_tkm = filtered_df_ready["tkm"].sum()
+
+    diesel_emissions = (total_tkm * DIESEL_EMISSION_FACTOR) / 1_000_000
+    grid_bev_emissions = (total_tkm * GRID_BEV_EMISSION_FACTOR) / 1_000_000
+    solar_bev_emissions = (total_tkm * SOLAR_BEV_EMISSION_FACTOR) / 1_000_000
+
+    tax_diesel = diesel_emissions * CARBON_TAX_RATE
+    tax_grid = grid_bev_emissions * CARBON_TAX_RATE
+    tax_solar = solar_bev_emissions * CARBON_TAX_RATE
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      st.metric("Current Fleet (Diesel Baseline)", f"{diesel_emissions:,.2f} tCO2", delta=f"R {tax_diesel:,.2f} Tax Liability", delta_color="inverse")
+    with col2:
+      st.metric("Green Fleet (Solar BEV)", f"{solar_bev_emissions:,.2f} tCO2", delta=f"R {tax_solar:,.2f} Tax Liability", delta_color="normal")
+    with col3:
+      st.metric("Grid BEV (Eskom Coal Mix Warning)", f"{grid_bev_emissions:,.2f} tCO2", delta=f"R {tax_grid:,.2f} Tax Liability", delta_color="inverse")
+
+    st.info("Sustainable Logistics Insight: Calculations utilize dynamic individual shipment payload masses and ISO 14083 activity-based tkm methodology.")
+  else:
+    st.warning("Required distance or weight data not available in the current view.")
+
+  st.divider()
+
+  # ADDED BACK: Temperature Histogram
+  st.subheader("Temperature Distribution")
+  fig = px.histogram(filtered_df, x="temperature_celsius", nbins=20, color_discrete_sequence=["#008080"])
+  st.plotly_chart(fig, width="stretch")
+
+  # ADDED BACK: SCOR Expander
+  with st.expander("SCOR Framework Alignment"):
+    st.markdown("""
+        **Reliability (RL.1.1)** - Perfect Order Fulfillment (On-Time + No Breach)  
+        **Responsiveness (RS.1.1)** - Average Transit Time (hours)  
+        **Agility (AG.1.3)** - Value at Risk (route_risk_score x impact)  
+        **Cost (CO.3.15)** - Cost per Shipment (distance x rand/km + fixed)  
+        **Asset Management (AM.3.9)** - Capacity Utilization (simulated)  
+        """)
 
 with tab2:
   st.subheader("Logistics Data Table")
