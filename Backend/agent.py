@@ -181,31 +181,43 @@ def query_agent(payload: AgentQueryRequest):
             detail="Gemini API Client not initialized. Set GEMINI_API_KEY in Render environment."
         )
 
-    try:
-        response = ai_client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=payload.user_query,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                tools=[
-                    get_active_fleet_telemetry,
-                    predict_temperature_breach_risk,
-                    get_corridor_live_weather,
-                    simulate_modal_shift_economics
-                ],
-                tool_config=types.ToolConfig(
-                    function_calling_config=types.FunctionCallingConfig(
-                        mode="AUTO"
-                    )
-                ),
-                max_output_tokens=800,
-                temperature=0.1,
-            ),
-        )
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        tools=[
+            get_active_fleet_telemetry,
+            predict_temperature_breach_risk,
+            get_corridor_live_weather,
+            simulate_modal_shift_economics
+        ],
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode="AUTO"
+            )
+        ),
+        max_output_tokens=800,
+        temperature=0.1,
+    )
 
-        reply = response.text if response.text else "Operation acknowledged. Ready for your dispatch or query."
-        return AgentQueryResponse(response=reply)
+    candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash"]
+    last_err = None
 
-    except Exception as e:
-        logger.exception("Agent call failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    for model_name in candidate_models:
+        try:
+            logger.info("Attempting agent execution with model: %s", model_name)
+            response = ai_client.models.generate_content(
+                model=model_name,
+                contents=payload.user_query,
+                config=config,
+            )
+            reply = response.text if response.text else "Operation acknowledged. Ready for your dispatch or query."
+            return AgentQueryResponse(response=reply)
+        except Exception as e:
+            err_str = str(e)
+            logger.warning("Execution failed on %s: %s", model_name, err_str)
+            last_err = e
+            if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str:
+                continue
+            else:
+                raise HTTPException(status_code=500, detail=err_str)
+
+    raise HTTPException(status_code=503, detail=f"All candidate models unavailable: {str(last_err)}")
