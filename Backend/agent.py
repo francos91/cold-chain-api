@@ -198,7 +198,8 @@ async def query_agent(payload: AgentQueryRequest):
         temperature=0.1,
     )
 
-    candidate_models = ["gemini-2.0-flash", "gemini-3.8-flash"]
+    # gemini-3.8-flash is the active production model
+    candidate_models = ["gemini-3.8-flash"]
     last_err = None
 
     for model_name in candidate_models:
@@ -215,9 +216,9 @@ async def query_agent(payload: AgentQueryRequest):
             err_str = str(e)
             logger.warning("Execution failed on %s: %s", model_name, err_str)
             last_err = e
-            if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str:
+            if any(code in err_str for code in ["503", "429", "UNAVAILABLE"]):
                 continue
             else:
                 raise HTTPException(status_code=500, detail=err_str)
 
-    raise HTTPException(status_code=503, detail=f"All candidate models unavailable: {str(last_err)}")
+    raise HTTPException(status_code=503, detail=f"Agent model unavailable: {str(last_err)}")
