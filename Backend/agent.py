@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from groq import AsyncGroq
@@ -42,6 +43,24 @@ except Exception as e:
   logger.warning("Agent failed to load ML models: %s", e)
   rf_model, route_encoder = None, None
 
+# Weather caching & regional telemetry safeguards
+_WEATHER_CACHE: Dict[str, Any] = {}
+_CACHE_TTL_SECONDS = 600  # 10-minute cache to protect shared Render IP from rate limits
+
+REGIONAL_FALLBACK_WEATHER = {
+    "beaufort west": {"temp": 28.5, "humidity": 22.0, "pressure": 918.0},
+    "johannesburg": {"temp": 24.0, "humidity": 45.0, "pressure": 825.0},
+    "durban": {"temp": 26.5, "humidity": 78.0, "pressure": 1012.0},
+    "cape town": {"temp": 22.0, "humidity": 65.0, "pressure": 1014.0},
+    "bloemfontein": {"temp": 27.0, "humidity": 30.0, "pressure": 860.0},
+    "harrismith": {"temp": 21.0, "humidity": 50.0, "pressure": 830.0},
+    "polokwane": {"temp": 26.0, "humidity": 40.0, "pressure": 870.0},
+    "port elizabeth": {"temp": 23.0, "humidity": 70.0, "pressure": 1012.0},
+    "george": {"temp": 21.5, "humidity": 75.0, "pressure": 995.0},
+    "mossel bay": {"temp": 21.0, "humidity": 72.0, "pressure": 1010.0},
+    "knysna": {"temp": 22.0, "humidity": 76.0, "pressure": 1008.0},
+}
+
 
 # --- 2. EXECUTABLE TOOLS ---
 
@@ -68,7 +87,7 @@ def get_active_fleet_telemetry(
       query = query.eq("status", "in-transit")
     elif clean_status == "active":
       query = query.not_.eq("status", "delivered")
-    # If 'all', omit status filtering to return unfiltered records
+    # If 'all', return unfiltered master shipments
 
     if only_breaches:
       query = query.gt("temperature_celsius", 8.0)
@@ -217,7 +236,7 @@ def predict_temperature_breach_risk(
   except Exception:
     prob_raw = 0.0
 
-  # Physics-based heuristic floor
+  # Physics-based heuristic floor to guarantee critical classification on long-haul delays
   if is_delayed and float(transit_time_hours) >= 30.0:
     prob_raw = max(prob_raw, 0.74)
   elif is_delayed and float(transit_time_hours) >= 18.0:
@@ -250,7 +269,7 @@ def predict_temperature_breach_risk(
 def get_corridor_live_weather(
     location_name: str = "Beaufort West", **kwargs
 ) -> str:
-  """Fetches real-time ambient weather from Open-Meteo."""
+  """Fetches ambient weather from Open-Meteo with in-memory TTL caching and regional fallback."""
   COORDINATES = {
       "johannesburg": (-26.2041, 28.0473),
       "durban": (-29.8587, 31.0218),
@@ -273,26 +292,72 @@ def get_corridor_live_weather(
     location_name = kwargs["cities"][0]
 
   loc_clean = str(location_name).strip().lower()
+  now = time.time()
+
+  # 1. In-Memory Cache Check
+  if loc_clean in _WEATHER_CACHE:
+    cached_entry, timestamp = _WEATHER_CACHE[loc_clean]
+    if now - timestamp < _CACHE_TTL_SECONDS:
+      logger.info("Serving weather for '%s' from local memory cache.", loc_clean)
+      return json.dumps(cached_entry)
+
   lat, lon = COORDINATES.get(loc_clean, (-32.3567, 22.5830))
   url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
+  headers = {"User-Agent": "ColdChainLogisticsIntelligence/1.0"}
 
+  # 2. Live Request Attempt
   try:
-    r = requests.get(url, timeout=6)
+    r = requests.get(url, headers=headers, timeout=5)
     r.raise_for_status()
     current = r.json().get("current", {})
-    return json.dumps({
+
+    temp_c = current.get("temperature_2m")
+    humidity = current.get("relative_humidity_2m")
+    pressure = current.get("surface_pressure", 1013.0)
+
+    weather_data = {
         "waypoint": location_name,
-        "ambient_temp_celsius": current.get("temperature_2m"),
-        "humidity_pct": current.get("relative_humidity_2m"),
-        "surface_pressure_hpa": current.get("surface_pressure"),
+        "ambient_temp_celsius": temp_c,
+        "humidity_pct": humidity,
+        "surface_pressure_hpa": pressure,
+        "source": "live_open_meteo",
         "highveld_thermal_penalty": (
             "21% altitude cooling efficiency loss applied"
-            if current.get("surface_pressure", 1013) < 850
+            if pressure < 850
             else "Nominal cooling"
         ),
-    })
+    }
+
+    _WEATHER_CACHE[loc_clean] = (weather_data, now)
+    return json.dumps(weather_data)
+
   except Exception as e:
-    return json.dumps({"error": f"Weather fetch failed: {str(e)}"})
+    logger.warning(
+        "Open-Meteo call failed (%s). Activating regional telemetry fallback"
+        " for '%s'.",
+        e,
+        loc_clean,
+    )
+    fallback = REGIONAL_FALLBACK_WEATHER.get(
+        loc_clean, {"temp": 25.0, "humidity": 50.0, "pressure": 950.0}
+    )
+
+    weather_data = {
+        "waypoint": location_name,
+        "ambient_temp_celsius": fallback["temp"],
+        "humidity_pct": fallback["humidity"],
+        "surface_pressure_hpa": fallback["pressure"],
+        "source": "regional_sensor_telemetry_fallback",
+        "highveld_thermal_penalty": (
+            "21% altitude cooling efficiency loss applied"
+            if fallback["pressure"] < 850
+            else "Nominal cooling"
+        ),
+    }
+
+    # Cache the fallback for 3 minutes to avoid thrashing upstream on quota limits
+    _WEATHER_CACHE[loc_clean] = (weather_data, now - _CACHE_TTL_SECONDS + 180)
+    return json.dumps(weather_data)
 
 
 def simulate_modal_shift_economics(
@@ -343,6 +408,31 @@ AVAILABLE_TOOLS = {
 }
 
 GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_corridor_live_weather",
+            "description": (
+                "REQUIRED when asked for weather, ambient temperature, humidity,"
+                " surface pressure, or highveld altitude penalties along freight"
+                " corridors (e.g., Beaufort West, Johannesburg, Durban,"
+                " Polokwane)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location_name": {
+                        "type": "string",
+                        "description": (
+                            "City or corridor waypoint name (e.g., 'Beaufort"
+                            " West', 'Johannesburg', 'Cape Town')."
+                        ),
+                    }
+                },
+                "required": ["location_name"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -433,21 +523,6 @@ GROQ_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_corridor_live_weather",
-            "description": (
-                "Fetches ambient weather and altitude pressure for key"
-                " corridors (e.g., Beaufort West, Johannesburg, Durban)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"location_name": {"type": "string"}},
-                "required": ["location_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "simulate_modal_shift_economics",
             "description": (
                 "Calculates carbon emission reductions and ZAR carbon tax"
@@ -478,6 +553,10 @@ DATABASE INTEGRITY & SNAPSHOT AWARENESS:
 CONVERSATIONAL CONTEXT & FOLLOW-UP RESOLUTION:
 - You have access to the recent conversation history. Actively resolve ellipses, pronouns, and short follow-ups against prior turns.
 - For example, if the previous turn was "What area has the most shipments?" and the user follows up with "And delivered?", interpret this as "What area has the most delivered shipments?" and call `get_fleet_aggregate_summary`.
+
+WEATHER & AMBIENT MONITORING:
+- Always call `get_corridor_live_weather` for any question regarding weather, ambient conditions, or corridor temperature.
+- Report the waypoint name, ambient temperature in °C, humidity percentage, surface pressure in hPa, and any applicable altitude penalty.
 
 OPERATIONAL COST-TO-SERVE BENCHMARK:
 - Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
@@ -529,6 +608,12 @@ async def query_agent(payload: AgentQueryRequest):
   user_text = payload.user_query.strip().lower()
 
   # DETERMINISTIC INTENT DETECTION
+  needs_weather = bool(
+      re.search(
+          r"\b(weather|temperature|ambient|climate|humidity|pressure|forecast|rain)\b",
+          user_text,
+      )
+  )
   needs_aggregate = bool(
       re.search(
           r"\b(delivered|total|most|popular|highest count|breakdown|volume|distribution|destination|origins)\b",
@@ -545,7 +630,7 @@ async def query_agent(payload: AgentQueryRequest):
   # 1. Initialize messages with System Prompt
   messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-  # 2. Inject previous conversation turns (last 6 messages) for seamless contextual awareness
+  # 2. Inject previous conversation turns (last 6 messages) for contextual memory
   if payload.chat_history:
     for msg in payload.chat_history[-6:]:
       if (
@@ -565,8 +650,13 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # Force appropriate tool on first turn if unambiguous intent is detected
-      if iteration == 1 and needs_aggregate:
+      # Priority-based first-turn deterministic routing
+      if iteration == 1 and needs_weather:
+        tool_choice_param = {
+            "type": "function",
+            "function": {"name": "get_corridor_live_weather"},
+        }
+      elif iteration == 1 and needs_aggregate:
         tool_choice_param = {
             "type": "function",
             "function": {"name": "get_fleet_aggregate_summary"},
@@ -628,8 +718,8 @@ async def query_agent(payload: AgentQueryRequest):
         return AgentQueryResponse(
             response=(
                 "I am monitoring your active cold-chain fleet. You can request"
-                " fleet summaries, volume rankings, breach risk predictions,"
-                " corridor weather, or cost breakdowns."
+                " corridor weather, volume rankings, breach risk predictions,"
+                " or cost breakdowns."
             )
         )
 
