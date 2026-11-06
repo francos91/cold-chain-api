@@ -51,8 +51,8 @@ def submit_query(prompt_text: str):
         with st.spinner("🤖 Autonomous Agent invoking internal tools..."):
             try:
                 payload = {"user_query": prompt_text}
-                # Groq responds in <1.5s; 25s is safe for Render cold starts
-                res = requests.post(API_AGENT_URL, json=payload, timeout=25)
+                # Increased to 60s to prevent Read timed out errors during multi-turn queries & cold starts
+                res = requests.post(API_AGENT_URL, json=payload, timeout=60)
                 if res.status_code == 200:
                     ans = res.json().get("response", "No response received.")
                 else:
