@@ -120,7 +120,7 @@ def get_corridor_live_weather(location_name: str = "Beaufort West", **kwargs) ->
         "knysna": (-34.0363, 23.0471)
     }
     
-    # Handle hallucinated arguments like lists of cities
+    # Handle array arguments for weather (e.g. cities: ["Cape Town", "Durban"])
     if "cities" in kwargs and isinstance(kwargs["cities"], list) and len(kwargs["cities"]) > 0:
         location_name = kwargs["cities"][0]
 
@@ -185,7 +185,7 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_active_fleet_telemetry",
-            "description": "Fetches live telemetry for active (non-delivered) shipments from Supabase.",
+            "description": "Fetches live telemetry for active (non-delivered) shipments from Supabase, including distances, temperatures, and status.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -249,17 +249,29 @@ GROQ_TOOLS = [
 ]
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
-You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, and carbon calculations.
+You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, and carbon calculations.
 
 AUTONOMOUS DECISION RULES:
 1. NEVER STALL OR LOOP INTO ASKING FOR CLARIFICATION:
-   - When asked for "best performer", "poorest", "worst performer", "summary", "summary on shipments", "today's summary", "overall", or "you pick":
+   - When asked for "best performer", "poorest", "worst performer", "summary", "summary on shipments", "today's summary", "overall", "cost", "costs", "operational cost", "overall operational cost", or "you pick":
      DO NOT ask the user to specify metrics. IMMEDIATELY call `get_active_fleet_telemetry`.
-2. OPERATIONAL BENCHMARKS:
+2. OPERATIONAL COST-TO-SERVE BENCHMARK:
+   - When asked for operational costs, financial exposure, fleet spend, or cost summary:
+     Call `get_active_fleet_telemetry`.
+     Compute trip cost for each shipment using: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
+     Sum and report total active fleet cost, average cost per shipment, and identify the highest cost corridor.
+3. OPERATIONAL PERFORMANCE BENCHMARKS:
    - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
    - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
    - "Summary / Overall" = Call `get_active_fleet_telemetry`, report active fleet count, delayed vs in-transit count, and detail any active excursions (>8.0°C).
-3. TOOL-CALLING INTEGRITY:
+4. CURRENCY & UNIT FIDELITY:
+   - Always report monetary values in exact South African Rand (ZAR / R).
+   - Never round single Rand values into thousands ('k') unless the value explicitly exceeds R1,000.
+   - Example: R256.20 must be written as R256.20, NOT R256k.
+5. RESILIENCE & FUZZY MATCHING:
+   - If a prompt contains typos, missing words, or garbled syntax, infer the operational intent (telemetry, weather, risk, cost, or carbon) and execute the appropriate tool or response directly.
+   - Never output empty text or refuse to assist.
+6. TOOL-CALLING INTEGRITY:
    - Only call defined tools: `get_active_fleet_telemetry`, `predict_temperature_breach_risk`, `get_corridor_live_weather`, `simulate_modal_shift_economics`.
    - For waypoint weather, provide a single city string (e.g., "Beaufort West", "Johannesburg", "Durban").
 """
@@ -304,26 +316,38 @@ async def query_agent(payload: AgentQueryRequest):
             )
             response_msg = completion.choices[0].message
 
-            # If no tools called, we have our final synthesized text
+            # If no tools called, ensure we return valid synthesized text
             if not response_msg.tool_calls:
-                return AgentQueryResponse(response=response_msg.content or "Fleet telemetry and analytics ready.")
+                content = response_msg.content
+                # Guard against Groq returning an empty or whitespace string
+                if not content or content.strip() == "":
+                    fallback_res = await groq_client.chat.completions.create(
+                        model=ACTIVE_MODEL,
+                        messages=messages,
+                        temperature=0.2,
+                        max_tokens=800
+                    )
+                    content = fallback_res.choices[0].message.content or (
+                        "I am actively monitoring your South African cold-chain fleet. "
+                        "You can request a fleet summary, operational cost breakdown, corridor weather, or breach risk prediction."
+                    )
+                return AgentQueryResponse(response=content)
 
-            # Append sanitized assistant message dictionary
-            clean_tool_calls = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in response_msg.tool_calls
-            ]
-
+            # Build clean assistant dictionary with only valid spec keys
+            # (Strictly omits None/empty content and SDK internal metadata like 'annotations')
             assistant_payload: Dict[str, Any] = {
                 "role": "assistant",
-                "tool_calls": clean_tool_calls,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in response_msg.tool_calls
+                ]
             }
             if response_msg.content:
                 assistant_payload["content"] = response_msg.content
@@ -368,7 +392,9 @@ async def query_agent(payload: AgentQueryRequest):
             temperature=0.1,
             max_tokens=1200
         )
-        return AgentQueryResponse(response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit.")
+        return AgentQueryResponse(
+            response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit."
+        )
 
     except Exception as e:
         logger.exception("Agent execution failed: %s", str(e))
