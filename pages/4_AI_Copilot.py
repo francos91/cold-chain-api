@@ -29,7 +29,7 @@ example_queries = [
     "If we shift 35% of freight on Natcor from road to rail, how much carbon tax do we save?",
 ]
 
-# Maintain chat history
+# Maintain unified chat history state
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
         {
@@ -46,11 +46,10 @@ if "chat_messages" not in st.session_state:
         }
     ]
 
-# Render existing chat history
+# Render existing chat history & LLMOps feedback widgets
 for i, msg in enumerate(st.session_state.chat_messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        # 2. ADD LLMOps FEEDBACK TO ASSISTANT MESSAGES (Skip the welcome message at index 0)
         if msg["role"] == "assistant" and i > 0:
             feedback = st.feedback("thumbs", key=f"feedback_{i}")
             if feedback is not None:
@@ -61,7 +60,7 @@ def submit_query(prompt_text: str):
     with st.chat_message("user"):
         st.markdown(prompt_text)
 
-    # 3. FORMAT HISTORY FOR BACKEND MEMORY
+    # Format recent history for backend memory payload
     history_payload = [
         {"role": m["role"], "content": m["content"]}
         for m in st.session_state.chat_messages[:-1]
@@ -74,9 +73,8 @@ def submit_query(prompt_text: str):
                 payload = {
                     "user_query": prompt_text,
                     "chat_history": history_payload,
-                    "user_role": user_role  # 4. PASS THE ROLE TO THE BACKEND
+                    "user_role": user_role
                 }
-                # Groq responds fast, 35s timeout is safe for Render cold starts & multiple tools
                 res = requests.post(API_AGENT_URL, json=payload, timeout=35)
                 if res.status_code == 200:
                     ans = res.json().get("response", "No response received.")
@@ -88,13 +86,13 @@ def submit_query(prompt_text: str):
             st.markdown(ans)
             st.session_state.chat_messages.append({"role": "assistant", "content": ans})
 
-# Execute Quick Actions
+# Execute Quick Actions from Sidebar
 for q in example_queries:
     if st.sidebar.button(q):
         submit_query(q)
         st.rerun()
 
-# User Input Box
+# User Chat Input Box
 if user_prompt := st.chat_input("Ask an operational question or what-if scenario..."):
     submit_query(user_prompt)
     st.rerun()
