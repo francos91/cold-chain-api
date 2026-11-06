@@ -1,71 +1,73 @@
 # Cold Chain Logistics Transport Intelligence Dashboard
 [![Cold Chain Logistics CI/CD](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml/badge.svg)](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml)
 
-A technical project demonstrating an end-to-end data pipeline for monitoring cold chain integrity, from data ingestion to predictive risk analysis using machine learning.
+A technical project demonstrating an end-to-end data pipeline and decision-support architecture for monitoring cold chain integrity, from real-time IoT telemetry ingestion to predictive risk analysis, corridor weather integration, and an autonomous AI Control Tower Copilot powered by ultra-low-latency Groq LPUs.
 
 ## Live Demos (Parallel Deployment)
 - **V1 (Legacy Dashboard):** [Streamlit Cloud (Direct DB)](https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/)
 - **V2 (API-Driven Dashboard):** [Streamlit Cloud (Microservice Client)](https://cold-chain-api-xsceu8pzmbemnpx4kiqd9t.streamlit.app/)
+- **Backend API (Docker + Render):** [`https://cold-chain-api-docker.onrender.com`](https://cold-chain-api-docker.onrender.com)
 
 ## Microservices & Docker Architecture (V2 Upgrade)
 The system has been upgraded from a monolithic structure to a decoupled microservices architecture:
-- **Backend API (Docker + Render):** The core logic is containerized using a custom `Dockerfile` (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, safely loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`) from the `dashboard/` directory and executing heavy calculations.
-- **Frontend Client (`Overview.py`):** The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex queries. Instead, it fetches pre-processed datasets and metrics directly from the Dockerized FastAPI backend.
-- **Parallel Hosting:** Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards are hosted concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
+- **Backend API (Docker + Render):** The core logic is containerized using a custom `Dockerfile` (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`), running feature transformations, and hosting dedicated data and telemetry routes.
+- **Autonomous AI Operations Copilot (`Backend/agent.py`):** An operational agent deployed on Groq's LPU hardware (`openai/gpt-oss-120b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, Random Forest model inference, and intermodal carbon tax calculators.
+- **Frontend Client (`Overview.py` & Multi-Page Suite):** The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex database queries locally. Instead, it consumes pre-processed datasets, telemetry streams, and agent endpoints directly from the Dockerized FastAPI backend.
+- **Data Ingestion Sanitation:** Automatic normalization standardizes shipment status values (`in-transit`, `delayed`, `delivered`) across the API and frontend caches, eliminating duplicate entries in the filter dropdowns and analytics charts.
+- **Parallel Hosting:** Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards run concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
 
 ## Project Overview
-This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
+This pipeline was developed to address the challenge of real-time logistics monitoring. It tracks shipment status, distance, transit times, weight, and temperature excursions, providing actionable insights to identify high-risk transport corridors, evaluate financial exposure (Cost-to-Serve), and quantify carbon emissions. The system includes an autonomous AI agent and a live machine learning model that predicts temperature breach risks for individual shipments based on historical route patterns, physical distances, and transit times.
 
 ## System Architecture
 
 ### Technical Architecture
-- **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to securely ingest telemetry data in real-time.
+- **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to ingest telemetry data and serve analytical payloads in real time.
+- **AI Agent Copilot (Groq LPU Engine)**: A dedicated reasoning layer (`Backend/agent.py`) using `openai/gpt-oss-120b` with autonomous tool calling:
+  - `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions ($>8.0^\circ\text{C}$).
+  - `predict_temperature_breach_risk`: Containerized Random Forest inference for what-if route dispatches.
+  - `get_corridor_live_weather`: Open-Meteo integration for ambient temperature, humidity, and Highveld pressure drops.
+  - `simulate_modal_shift_economics`: Activity-based carbon accounting and South African Carbon Tax savings (R28.00/tCO2).
 - **Dual-Table Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database utilizing a relational dual-table structure:
   - `cold_chain_tracking`: The master table storing shipment records, statuses, distances, transit hours, and dynamic cargo weights.
   - `temperature_stream`: A time-series table storing high-frequency OSRM-generated GPS coordinates and thermodynamic temperature fluctuations.
-- **Frontend Dashboard (Streamlit Cloud)**: A multi-tab control tower that processes live data, identifies temperature excursions, quantifies carbon emissions, and visualizes route risk scores. 
-- **Thermal Profile & GPS Analysis**: A dedicated tab allowing users to visualize a shipment's temperature curve against the status average, complete with an interactive GPS route map colored by temperature and start/end geographic markers.
+- **Frontend Dashboard (Streamlit Cloud)**: A multi-page control tower (`pages/`) that processes live data, identifies temperature excursions, quantifies carbon emissions, and visualizes route risk scores:
+  - `1_Risk_Intelligence.py`: Dynamic breach probability slider with partial-page rendering via `@st.fragment`.
+  - `2_Thermal_Tracking.py`: High-frequency temperature curves matched against corridor averages and GPS route maps.
+  - `3_Intermodal_Simulator.py`: Road vs. rail freight shift modeling under ISO 14083 emissions factors.
+  - `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent.
 
-## Two-Stage Machine Learning Architecture
-
-This project utilizes a two-stage machine learning pipeline, separating the generation of realistic synthetic telemetry from the real-time operational dashboard.
-
-### 1. Environmental Simulation Engine (`lade_delay_model.pkl`)
-Because real-world cold chain telemetry is highly proprietary, this project requires a physics-based synthetic data generator. To ensure the generated data reflects real-world supply chain bottlenecks rather than random noise, the data feeder pipeline utilizes a dedicated ML model.
-- **Training Data:** Trained on the Cainiao-AI/LaDe dataset (a massive real-world last-mile delivery dataset).
-- **Function:** Predicts the probability of a shipment delay based on temporal and regional features (Time of Day, Day of Week, Area of Interest Type).
-- **Role in Pipeline:** This model acts as the "Simulator." During the data generation phase, the Python script asked this model to predict whether each of the 4,500 simulated shipments would be delayed. If a delay was predicted, the physics engine applied a thermodynamic temperature rise. The final payload was then pushed to the FastAPI backend.
-
-### 2. Real-Time Risk Intelligence (`advanced_model.pkl`)
-This is the core predictive model operating inside the Streamlit Control Tower. It evaluates the telemetry data sitting in the Supabase PostgreSQL database to flag high-risk shipments before a temperature excursion occurs.
-- **Training Data:** Trained on the causal physics-based telemetry generated by the simulation engine, encompassing spatial routing, distances, transit times, and delay statuses.
-- **Function:** A 5-feature Random Forest Classifier that predicts the continuous probability of a Cold Chain Breach (Temperature > 8°C).
-- **Role in Pipeline:** Loaded directly into `app.py`. It powers the dynamic Risk Threshold Slider (optimized with `@st.fragment` for high-performance UI rendering), allowing operations managers to identify and intercept high-risk fleet assets based on their continuous probability scores.
 
 ## Repository Structure
 ```text
 cold-chain-api/
-├── .devcontainer/           # Dev container configuration
+├── .devcontainer/
+│   └── devcontainer.json        # Dev container configuration
 ├── .github/
 │   └── workflows/
-│       └── ci.yml           # GitHub Actions CI/CD pipeline
-├── dashboard/
-│   ├── app.py               # Streamlit frontend (control tower)
-│   ├── advanced_model.pkl   # RF breach-risk model
-│   ├── lade_delay_model.pkl # LaDe-trained delay predictor (simulation only)
-│   ├── lade_features.pkl    # Feature order for delay predictor
-│   ├── le_route.pkl         # Label encoder for routes
-│   └── requirements.txt     # Dashboard dependencies
-├── tests/
-│   ├── test_api.py          # FastAPI endpoint tests
-│   ├── test_ml_model.py     # ML feature-shape & inference checks
-│   ├── test_physics.py      # Cost-to-serve & carbon-accounting tests
-│   └── test_thermal.py      # Thermal excursion boundary tests
-├── main.py                  # FastAPI backend (Render deployment)
-├── Notes.md                 # Design notes
-├── requirements.txt         # Backend / core dependencies
-└── system_architecture.md   # Architecture specifications
+│       └── ci.yml               # GitHub Actions CI/CD pipeline
+├── Backend/
+│   ├── agent.py                 # Autonomous GenAI Copilot (Groq LPU openai/gpt-oss-120b & native tool-calling)
+│   ├── main.py                  # Backend microservice routing layer
+│   └── requirements.txt         # GenAI agent & backend dependencies
+├── dashboard/                   # Machine learning artifacts & legacy dashboard
+├── pages/
+│   ├── 1_Risk_Intelligence.py   # RF breach-risk threshold slider (@st.fragment)
+│   ├── 2_Thermal_Tracking.py    # Thermal profile curves & GPS telemetry mapping
+│   ├── 3_Intermodal_Simulator.py# Modal shift economics (Road vs Rail ISO 14083)
+│   └── 4_AI_Copilot.py          # Conversational UI for the GenAI Operations Copilot
+├── tests/                       # Unit tests (API, physics, ML, thermal)
+├── Dockerfile                   # Container specification for Render deployment
+├── License                      # CC BY-NC-SA 4.0 International License
+├── Notes.md                     # Design notes & development logs
+├── Overview.py                  # Root V2 Streamlit dashboard (SCOR KPIs)
+├── README.md                    # Project documentation
+├── main.py                      # FastAPI backend (Render deployment)
+├── requirements.txt             # Backend / core dependencies
+├── system_architecture_v3.png   # Microservices architecture specifications v3
+└── system_architecture_v4.png   # GenAI Copilot & tool-calling specifications v4
 ```
+
 
 ## Testing & CI/CD Pipeline
 This repository implements rigorous software engineering practices tailored for industrial logistics systems:
