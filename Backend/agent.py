@@ -13,15 +13,20 @@ from groq import AsyncGroq
 logger = logging.getLogger("coldchain-agent")
 router = APIRouter(prefix="/api/v1/agent", tags=["AI Operations Copilot"])
 
-# 1. Environment variables
+# 1. Environment variables with CI fallbacks
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
 
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY is not set in environment.")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    logger.warning(f"Supabase client initialization deferred: {e}")
+    supabase = None
+
 groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Load containerized ML assets
@@ -38,6 +43,8 @@ except Exception as e:
 
 def get_active_fleet_telemetry(only_breaches: bool = False) -> str:
     """Fetches live telemetry for active shipments from Supabase."""
+    if not supabase:
+        return json.dumps({"error": "Supabase client is not connected."})
     try:
         query = (
             supabase.table("cold_chain_tracking")
@@ -100,7 +107,7 @@ def get_corridor_live_weather(location_name: str) -> str:
     lat, lon = COORDINATES.get(location_name.strip().lower(), (-26.2041, 28.0473))
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
     try:
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=6)
         r.raise_for_status()
         current = r.json().get("current", {})
         return json.dumps({
@@ -120,9 +127,9 @@ def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, t
     rail_emission_factor = 12.2
     effective_tax_rate_zar = 28.0
 
-    baseline_emissions = (total_tkm * road_emission_factor) / 1_000_000
-    rail_tkm = total_tkm * (shift_percentage / 100.0)
-    remaining_road_tkm = total_tkm * (1 - (shift_percentage / 100.0))
+    baseline_emissions = (float(total_tkm) * road_emission_factor) / 1_000_000
+    rail_tkm = float(total_tkm) * (float(shift_percentage) / 100.0)
+    remaining_road_tkm = float(total_tkm) * (1 - (float(shift_percentage) / 100.0))
 
     new_emissions = ((remaining_road_tkm * road_emission_factor) + (rail_tkm * rail_emission_factor)) / 1_000_000
     carbon_saved_tco2 = baseline_emissions - new_emissions
