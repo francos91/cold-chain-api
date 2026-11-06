@@ -197,8 +197,8 @@ async def query_agent(payload: AgentQueryRequest):
         max_output_tokens=800,
     )
 
-    # Use fast low-latency models; avoid long-horizon reasoning hangs
-    candidate_models = ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
+    # Use currently supported active models: gemini-3.8-flash and dynamic flash alias
+    candidate_models = ["gemini-3.8-flash", "gemini-flash-latest"]
     last_err = None
 
     for model_name in candidate_models:
