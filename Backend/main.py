@@ -9,10 +9,15 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from supabase import Client, create_client
 
+from agent import router as agent_router
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("logistics-api")
 
 app = FastAPI(title="Logistics Data Pipeline API", version="1.3.0")
+
+# Register AI Agent Router
+app.include_router(agent_router)
 
 # Secure environment initialization
 SUPABASE_URL = os.getenv("SUPABASE_URL")
