@@ -82,12 +82,6 @@ def predict_temperature_breach_risk(
         {"error": "ML models not available in backend container."}
     )
 
-  route_key = f"{origin}_to_{destination}"
-  try:
-    route_enc = int(route_encoder.transform([route_key])[0])
-  except Exception:
-    route_enc = 0
-
   # Standard freight corridor distances to prevent arbitrary 600km fallbacks
   KNOWN_CORRIDOR_DISTANCES = {
       "polokwane_to_knysna": 1605.7,
@@ -98,18 +92,48 @@ def predict_temperature_breach_risk(
       "polokwane_to_stellenbosch": 1894.7,
       "george_to_polokwane": 1633.0,
       "polokwane_to_george": 1633.0,
-      "johannesburg_to_cape town": 1398.0,
-      "cape town_to_johannesburg": 1398.0,
-      "cape town_to_durban": 1635.0,
-      "durban_to_cape town": 1635.0,
+      "johannesburg_to_cape_town": 1398.0,
+      "cape_town_to_johannesburg": 1398.0,
+      "cape_town_to_durban": 1635.0,
+      "durban_to_cape_town": 1635.0,
   }
 
-  route_lookup_key = route_key.strip().lower()
-  effective_distance = float(distance_km)
-  if effective_distance == 600.0 and route_lookup_key in KNOWN_CORRIDOR_DISTANCES:
-    effective_distance = KNOWN_CORRIDOR_DISTANCES[route_lookup_key]
+  clean_origin = str(origin).strip().lower().replace(" ", "_")
+  clean_destination = str(destination).strip().lower().replace(" ", "_")
+  route_key_normalized = f"{clean_origin}_to_{clean_destination}"
+  route_key_title = f"{origin.strip().title().replace(' ', '_')}_to_{destination.strip().title().replace(' ', '_')}"
 
-  route_risk_proxy = 0.22 if is_delayed else 0.08
+  effective_distance = float(distance_km)
+  if (
+      effective_distance == 600.0
+      and route_key_normalized in KNOWN_CORRIDOR_DISTANCES
+  ):
+    effective_distance = KNOWN_CORRIDOR_DISTANCES[route_key_normalized]
+
+  # Try encoded matches across casing variations
+  route_enc = None
+  for candidate in [
+      route_key_normalized,
+      route_key_title,
+      f"{origin}_to_{destination}",
+  ]:
+    try:
+      route_enc = int(route_encoder.transform([candidate])[0])
+      break
+    except Exception:
+      continue
+
+  if route_enc is None:
+    route_enc = (
+        len(route_encoder.classes_) // 2
+        if hasattr(route_encoder, "classes_")
+        else 5
+    )
+
+  # Calibrate route risk dynamically based on delay state and transit duration
+  base_risk = 0.50 if is_delayed else 0.10
+  duration_penalty = min(0.35, (float(transit_time_hours) / 40.0) * 0.35)
+  route_risk_proxy = round(min(0.95, base_risk + duration_penalty), 2)
   delayed_flag = 1 if is_delayed else 0
 
   features = pd.DataFrame([{
@@ -131,13 +155,14 @@ def predict_temperature_breach_risk(
     classification = "LOW RISK"
 
   return json.dumps({
-      "route": route_key,
+      "route": f"{origin} to {destination}",
       "breach_probability_pct": prob_pct,
       "risk_classification": classification,
       "parameters": {
           "is_delayed": is_delayed,
           "transit_time_hours": transit_time_hours,
           "distance_km": effective_distance,
+          "route_risk_score": route_risk_proxy,
       },
   })
 
