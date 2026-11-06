@@ -5,7 +5,7 @@ st.set_page_config(page_title="AI Operations Copilot", layout="wide", page_icon=
 
 st.title("🤖 Autonomous Cold Chain Operations Copilot")
 st.markdown(
-    "Powered by **Gemini 3.8 Flash** with native tool-calling into our "
+    "Powered by **Llama 3.3 70B on Groq LPUs** with native tool-calling into our "
     "**Random Forest Inference Engine**, **Live Open-Meteo Weather**, and **Supabase Relational Telemetry**."
 )
 
@@ -51,7 +51,8 @@ def submit_query(prompt_text: str):
         with st.spinner("🤖 Autonomous Agent invoking internal tools..."):
             try:
                 payload = {"user_query": prompt_text}
-                res = requests.post(API_AGENT_URL, json=payload, timeout=90)
+                # Groq responds in <1.5s; 25s is safe for Render cold starts
+                res = requests.post(API_AGENT_URL, json=payload, timeout=25)
                 if res.status_code == 200:
                     ans = res.json().get("response", "No response received.")
                 else:
