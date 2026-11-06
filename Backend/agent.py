@@ -2,12 +2,12 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from groq import AsyncGroq
 import joblib
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import requests
 from supabase import Client, create_client
 
@@ -64,11 +64,11 @@ def get_active_fleet_telemetry(
       query = query.eq("status", "delivered")
     elif clean_status == "delayed":
       query = query.eq("status", "delayed")
-    elif clean_status == "in-transit" or clean_status == "in_transit":
+    elif clean_status in ("in-transit", "in_transit"):
       query = query.eq("status", "in-transit")
     elif clean_status == "active":
       query = query.not_.eq("status", "delivered")
-    # if 'all', do not filter on status
+    # If 'all', omit status filtering to return unfiltered records
 
     if only_breaches:
       query = query.gt("temperature_celsius", 8.0)
@@ -87,7 +87,6 @@ def get_fleet_aggregate_summary(**kwargs) -> str:
   if not supabase:
     return json.dumps({"error": "Supabase client is not connected."})
   try:
-    # Fetch all records across master database for accurate grouping
     res = (
         supabase.table("cold_chain_tracking")
         .select("shipment_id,origin,destination,status,temperature_celsius")
@@ -476,6 +475,10 @@ DATABASE INTEGRITY & SNAPSHOT AWARENESS:
 - When asked for overall counts, the most popular destinations/origins, delivered counts, or fleet status distributions, ALWAYS call `get_fleet_aggregate_summary`.
 - When using `get_active_fleet_telemetry`, recognize that it returns an active operational slice prioritized by thermal risk, NOT the entire historical database.
 
+CONVERSATIONAL CONTEXT & FOLLOW-UP RESOLUTION:
+- You have access to the recent conversation history. Actively resolve ellipses, pronouns, and short follow-ups against prior turns.
+- For example, if the previous turn was "What area has the most shipments?" and the user follows up with "And delivered?", interpret this as "What area has the most delivered shipments?" and call `get_fleet_aggregate_summary`.
+
 OPERATIONAL COST-TO-SERVE BENCHMARK:
 - Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
 - When answering cost questions, ALWAYS calculate and present:
@@ -495,11 +498,17 @@ CURRENCY & UNIT FIDELITY:
 """
 
 
-# --- 3. FASTAPI ROUTE ---
+# --- 3. FASTAPI ROUTE & STATEFUL CHAT HISTORY ---
+
+
+class ChatMessage(BaseModel):
+  role: str
+  content: str
 
 
 class AgentQueryRequest(BaseModel):
   user_query: str
+  chat_history: Optional[List[ChatMessage]] = Field(default_factory=list)
 
 
 class AgentQueryResponse(BaseModel):
@@ -533,10 +542,21 @@ async def query_agent(payload: AgentQueryRequest):
       )
   )
 
-  messages = [
-      {"role": "system", "content": SYSTEM_PROMPT},
-      {"role": "user", "content": payload.user_query},
-  ]
+  # 1. Initialize messages with System Prompt
+  messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+  # 2. Inject previous conversation turns (last 6 messages) for seamless contextual awareness
+  if payload.chat_history:
+    for msg in payload.chat_history[-6:]:
+      if (
+          msg.role in ("user", "assistant")
+          and msg.content
+          and msg.content.strip()
+      ):
+        messages.append({"role": msg.role, "content": msg.content.strip()})
+
+  # 3. Append current user query
+  messages.append({"role": "user", "content": payload.user_query})
 
   max_tool_iterations = 3
   iteration = 0
@@ -545,7 +565,7 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # Force appropriate tool on first turn if unambiguous intent detected
+      # Force appropriate tool on first turn if unambiguous intent is detected
       if iteration == 1 and needs_aggregate:
         tool_choice_param = {
             "type": "function",
