@@ -54,7 +54,9 @@ def get_active_fleet_telemetry(only_breaches: bool = False, **kwargs) -> str:
         )
         if only_breaches:
             query = query.gt("temperature_celsius", 8.0)
-        res = query.limit(50).execute()
+        
+        # Order by temperature descending so worst performers/breaches appear first
+        res = query.order("temperature_celsius", desc=True).limit(25).execute()
         return json.dumps(res.data or [])
     except Exception as e:
         return json.dumps({"error": f"Database query failed: {str(e)}"})
@@ -251,12 +253,12 @@ You assist operations managers with real-time fleet telemetry, predictive risk a
 
 AUTONOMOUS DECISION RULES:
 1. NEVER STALL OR LOOP INTO ASKING FOR CLARIFICATION:
-   - When asked for "best performer", "poorest", "worst performer", "summary", "today's summary", "overall", or "you pick":
+   - When asked for "best performer", "poorest", "worst performer", "summary", "summary on shipments", "today's summary", "overall", or "you pick":
      DO NOT ask the user to specify metrics. IMMEDIATELY call `get_active_fleet_telemetry`.
 2. OPERATIONAL BENCHMARKS:
    - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
    - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
-   - "Summary / Overall" = Call `get_active_fleet_telemetry`, compute active fleet count, delayed vs in-transit count, and list temperature breaches.
+   - "Summary / Overall" = Call `get_active_fleet_telemetry`, report active fleet count, delayed vs in-transit count, and detail any active excursions (>8.0°C).
 3. TOOL-CALLING INTEGRITY:
    - Only call defined tools: `get_active_fleet_telemetry`, `predict_temperature_breach_risk`, `get_corridor_live_weather`, `simulate_modal_shift_economics`.
    - For waypoint weather, provide a single city string (e.g., "Beaufort West", "Johannesburg", "Durban").
@@ -292,31 +294,32 @@ async def query_agent(payload: AgentQueryRequest):
             tools=GROQ_TOOLS,
             tool_choice="auto",
             temperature=0.1,
-            max_tokens=800
+            max_tokens=1000
         )
         response_msg = completion.choices[0].message
 
         # Handle tool calling
         if response_msg.tool_calls:
-            # Format clean tool_calls payload to strip unsupported SDK fields (e.g., 'annotations')
-            clean_tool_calls = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in response_msg.tool_calls
-            ]
-
-            # Append sanitized assistant message dictionary
-            messages.append({
+            # Build clean assistant dictionary with only valid spec keys
+            # (Strictly omits None/empty content and SDK internal metadata like 'annotations')
+            assistant_payload: Dict[str, Any] = {
                 "role": "assistant",
-                "content": response_msg.content or "",
-                "tool_calls": clean_tool_calls,
-            })
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in response_msg.tool_calls
+                ]
+            }
+            if response_msg.content:
+                assistant_payload["content"] = response_msg.content
+
+            messages.append(assistant_payload)
 
             for tool_call in response_msg.tool_calls:
                 func_name = tool_call.function.name
@@ -353,9 +356,14 @@ async def query_agent(payload: AgentQueryRequest):
                 model=ACTIVE_MODEL,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=800
+                max_tokens=1200
             )
-            return AgentQueryResponse(response=final_res.choices[0].message.content or "")
+            
+            final_content = final_res.choices[0].message.content
+            if not final_content:
+                final_content = "Active fleet telemetry retrieved successfully, but no analytical commentary was returned. Please re-issue your prompt."
+
+            return AgentQueryResponse(response=final_content)
 
         return AgentQueryResponse(response=response_msg.content or "Ready for your operations query.")
 
