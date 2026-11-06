@@ -73,8 +73,8 @@ with tab1:
     avg_transit = filtered_df_ready["transit_time_hours"].mean()
     avg_cost = filtered_df_ready["cost_per_shipment"].mean()
 
-    col1.metric("Perfect Order Rate", f"{perfect_rate:.1f}%")
-    col2.metric("On-Time Delivery", f"{ontime_rate:.1f}%")
+    col1.metric("OTIF (Perfect Order Rate)", f"{perfect_rate:.1f}%")
+    col2.metric("OTD (On-Time Delivery)", f"{ontime_rate:.1f}%")
     col3.metric("Temp Compliance", f"{temp_compliance:.1f}%")
     col4.metric("Avg Transit (h)", f"{avg_transit:.1f}")
     col5.metric("Avg Cost (ZAR)", f"R{avg_cost:,.0f}")
