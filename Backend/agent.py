@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
@@ -588,6 +587,7 @@ class ChatMessage(BaseModel):
 class AgentQueryRequest(BaseModel):
   user_query: str
   chat_history: Optional[List[ChatMessage]] = Field(default_factory=list)
+  user_role: Optional[str] = "Operations Manager"
 
 
 class AgentQueryResponse(BaseModel):
@@ -605,42 +605,23 @@ async def query_agent(payload: AgentQueryRequest):
         ),
     )
 
-  user_text = payload.user_query.strip().lower()
+  # 1. DYNAMIC PERSONA INJECTION
+  role_instructions = ""
+  if payload.user_role == "Executive":
+      role_instructions = "\nUSER ROLE: Executive. Keep answers brief, focus on total ZAR impact, OTIF, and high-level summaries. Do not list granular shipment IDs unless asked."
+  elif payload.user_role == "Dispatcher":
+      role_instructions = "\nUSER ROLE: Floor Dispatcher. Focus on specific shipment IDs, route names, thermal excursions, and immediate safety interventions."
+      
+  dynamic_system_prompt = SYSTEM_PROMPT + role_instructions
 
-  # DETERMINISTIC INTENT DETECTION
-  needs_weather = bool(
-      re.search(
-          r"\b(weather|temperature|ambient|climate|humidity|pressure|forecast|rain)\b",
-          user_text,
-      )
-  )
-  needs_aggregate = bool(
-      re.search(
-          r"\b(delivered|total|most|popular|highest count|breakdown|volume|distribution|destination|origins)\b",
-          user_text,
-      )
-  )
-  needs_telemetry = bool(
-      re.search(
-          r"\b(cost|costs|spend|financial|fleet|active|operations|performer|pick|excursion)\b",
-          user_text,
-      )
-  )
+  # 2. INITIALIZE MESSAGES
+  messages: List[Dict[str, Any]] = [{"role": "system", "content": dynamic_system_prompt}]
 
-  # 1. Initialize messages with System Prompt
-  messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-  # 2. Inject previous conversation turns (last 6 messages) for contextual memory
   if payload.chat_history:
     for msg in payload.chat_history[-6:]:
-      if (
-          msg.role in ("user", "assistant")
-          and msg.content
-          and msg.content.strip()
-      ):
+      if msg.role in ("user", "assistant") and msg.content and msg.content.strip():
         messages.append({"role": msg.role, "content": msg.content.strip()})
 
-  # 3. Append current user query
   messages.append({"role": "user", "content": payload.user_query})
 
   max_tool_iterations = 3
@@ -650,80 +631,28 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # Priority-based first-turn deterministic routing
-      if iteration == 1 and needs_weather:
-        tool_choice_param = {
-            "type": "function",
-            "function": {"name": "get_corridor_live_weather"},
-        }
-      elif iteration == 1 and needs_aggregate:
-        tool_choice_param = {
-            "type": "function",
-            "function": {"name": "get_fleet_aggregate_summary"},
-        }
-      elif iteration == 1 and needs_telemetry:
-        tool_choice_param = {
-            "type": "function",
-            "function": {"name": "get_active_fleet_telemetry"},
-        }
-      else:
-        tool_choice_param = "auto"
-
+      # 3. FULL AUTONOMY: We removed the regex. The 70B model decides exactly what tool it needs based on the query.
       completion = await groq_client.chat.completions.create(
           model=ACTIVE_MODEL,
           messages=messages,
           tools=GROQ_TOOLS,
-          tool_choice=tool_choice_param,
+          tool_choice="auto",
           temperature=0.1,
           max_tokens=900,
       )
       response_msg = completion.choices[0].message
 
-      # If no tools were called
+      # If no tools were called, the agent is ready to reply to the user
       if not response_msg.tool_calls:
         content = response_msg.content
         if content and content.strip():
           return AgentQueryResponse(response=content)
-
-        if needs_telemetry:
-          raw_data = json.loads(get_active_fleet_telemetry())
-          if isinstance(raw_data, list) and len(raw_data) > 0:
-            total_cost = sum(
-                (r.get("distance_km", 0) * 18.0) + 200.0 for r in raw_data
-            )
-            avg_cost = total_cost / len(raw_data)
-            top_shipments = sorted(
-                raw_data,
-                key=lambda x: (x.get("distance_km", 0) * 18.0) + 200.0,
-                reverse=True,
-            )[:3]
-
-            breakdown = "\n".join([
-                f"- **{s.get('shipment_id')}** ({s.get('origin')} ->"
-                f" {s.get('destination')}): {s.get('distance_km', 0):,.1f} km"
-                f" = **R{((s.get('distance_km', 0) * 18.0) + 200.0):,.2f}**"
-                for s in top_shipments
-            ])
-
-            return AgentQueryResponse(
-                response=(
-                    "### Operational Cost-to-Serve Summary\n\n"
-                    f"- **Active Shipments Analyzed:** {len(raw_data)}\n"
-                    f"- **Total Active Fleet Spend:** **R{total_cost:,.2f}**\n"
-                    f"- **Average Cost per Shipment:** **R{avg_cost:,.2f}**\n\n"
-                    f"**Top 3 Highest-Cost Shipments:**\n{breakdown}"
-                )
-            )
-
+        
         return AgentQueryResponse(
-            response=(
-                "I am monitoring your active cold-chain fleet. You can request"
-                " corridor weather, volume rankings, breach risk predictions,"
-                " or cost breakdowns."
-            )
+            response="I am monitoring your active cold-chain fleet. You can request corridor weather, volume rankings, or cost breakdowns."
         )
 
-      # Build clean assistant payload dictionary
+      # Build clean assistant payload dictionary for tool execution
       assistant_payload: Dict[str, Any] = {
           "role": "assistant",
           "tool_calls": [
@@ -746,7 +675,6 @@ async def query_agent(payload: AgentQueryRequest):
       # Execute each tool call emitted
       for tool_call in response_msg.tool_calls:
         func_name = tool_call.function.name
-
         try:
           func_args = json.loads(tool_call.function.arguments or "{}")
         except Exception:
@@ -755,26 +683,13 @@ async def query_agent(payload: AgentQueryRequest):
         tool_func = AVAILABLE_TOOLS.get(func_name)
 
         if tool_func:
-          logger.info(
-              "Iteration %d | Executing tool: %s with args: %s",
-              iteration,
-              func_name,
-              func_args,
-          )
+          logger.info("Iteration %d | Executing tool: %s", iteration, func_name)
           try:
             tool_output = tool_func(**func_args)
           except Exception as err:
-            tool_output = json.dumps(
-                {"error": f"Tool execution error: {str(err)}"}
-            )
+            tool_output = json.dumps({"error": f"Tool execution error: {str(err)}"})
         else:
-          logger.warning("Unknown tool attempted: %s", func_name)
-          tool_output = json.dumps({
-              "error": (
-                  f"Function '{func_name}' is not recognized. Valid tools:"
-                  f" {list(AVAILABLE_TOOLS.keys())}"
-              )
-          })
+          tool_output = json.dumps({"error": f"Function '{func_name}' is not recognized."})
 
         messages.append({
             "role": "tool",
@@ -783,13 +698,12 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call
+    # Final synthesis call after tools have run
     final_res = await groq_client.chat.completions.create(
         model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
     )
     return AgentQueryResponse(
-        response=final_res.choices[0].message.content
-        or "Completed multi-step fleet telemetry audit."
+        response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit."
     )
 
   except Exception as e:
