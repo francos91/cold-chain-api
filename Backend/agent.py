@@ -186,7 +186,7 @@ def query_agent(payload: AgentQueryRequest):
     try:
         # Pass Python functions directly into tools list for automatic function calling
         response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=payload.user_query,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
