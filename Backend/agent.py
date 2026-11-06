@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1/agent", tags=["AI Operations Copilot"])
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
+ACTIVE_MODEL = "openai/gpt-oss-120b"
 
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY is not set in environment.")
@@ -24,7 +25,7 @@ if not GROQ_API_KEY:
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
-    logger.warning(f"Supabase client initialization deferred: {e}")
+    logger.warning("Supabase client initialization deferred: %s", e)
     supabase = None
 
 groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -35,7 +36,7 @@ try:
     route_encoder = joblib.load("le_route.pkl")
     logger.info("Agent successfully loaded ML models.")
 except Exception as e:
-    logger.warning(f"Agent failed to load ML models: {e}")
+    logger.warning("Agent failed to load ML models: %s", e)
     rf_model, route_encoder = None, None
 
 
@@ -252,7 +253,7 @@ async def query_agent(payload: AgentQueryRequest):
 
     try:
         completion = await groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=ACTIVE_MODEL,
             messages=messages,
             tools=GROQ_TOOLS,
             tool_choice="auto",
@@ -287,7 +288,7 @@ async def query_agent(payload: AgentQueryRequest):
                 })
 
             final_res = await groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=ACTIVE_MODEL,
                 messages=messages,
                 temperature=0.1,
                 max_tokens=800
