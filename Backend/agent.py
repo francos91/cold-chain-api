@@ -152,17 +152,15 @@ def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, t
 
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for a South African Cold Chain Logistics Network.
-You have native access to executable tools:
-- `get_active_fleet_telemetry`: queries live active shipments in transit.
-- `predict_temperature_breach_risk`: runs the container's 5-feature Random Forest model.
-- `get_corridor_live_weather`: calls the live Open-Meteo API for ambient temperatures along key waypoints.
-- `simulate_modal_shift_economics`: evaluates ISO 14083 carbon accounting and R28/tCO2 tax liability.
+You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, and carbon calculations.
 
-Operational Rules:
-1. Perishable excursion threshold is strictly 8.0°C. Anything higher is an active CRITICAL BREACH.
-2. If the user asks a predictive or 'what-if' question, invoke `predict_temperature_breach_risk`.
-3. If the user asks about weather, ambient heat, or corridor conditions, invoke `get_corridor_live_weather`.
-4. Always provide quantitative figures, clean bullet points, and actionable next steps.
+You have access to 4 specific tools:
+1. `get_active_fleet_telemetry`: Use ONLY when asked about current fleet status, active loads, or temperature excursions (>8.0°C).
+2. `predict_temperature_breach_risk`: Use ONLY when asked to predict risk or evaluate what-if delay scenarios.
+3. `get_corridor_live_weather`: Use ONLY when asked about ambient temperature, weather, or corridor altitude conditions.
+4. `simulate_modal_shift_economics`: Use ONLY when asked about road-to-rail modal shifts or carbon tax savings.
+
+Important: For normal conversational input (e.g. 'hi', 'hello', 'who are you', 'help'), DO NOT call any tool. Respond directly, politely, and state what capabilities you can perform.
 """
 
 
@@ -184,7 +182,6 @@ def query_agent(payload: AgentQueryRequest):
         )
 
     try:
-        # Pass Python functions directly into tools list for automatic function calling
         response = ai_client.models.generate_content(
             model="gemini-3.8-flash",
             contents=payload.user_query,
@@ -196,11 +193,18 @@ def query_agent(payload: AgentQueryRequest):
                     get_corridor_live_weather,
                     simulate_modal_shift_economics
                 ],
-                max_output_tokens=1024,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode="AUTO"
+                    )
+                ),
+                max_output_tokens=800,
+                temperature=0.1,
             ),
         )
-        return AgentQueryResponse(response=response.text)
+
+        reply = response.text if response.text else "Operation acknowledged. Ready for your dispatch or query."
+        return AgentQueryResponse(response=reply)
 
     except Exception as e:
         logger.exception("Agent call failed")
