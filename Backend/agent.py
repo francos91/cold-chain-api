@@ -196,7 +196,8 @@ def query_agent(payload: AgentQueryRequest):
                     get_corridor_live_weather,
                     simulate_modal_shift_economics
                 ],
-                temperature=0.2,
+                max_output_tokens=1024,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
         return AgentQueryResponse(response=response.text)
