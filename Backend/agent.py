@@ -513,13 +513,13 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call with exponential backoff retry
+    # Final synthesis call with exponential backoff retry (Bumped max_tokens to 1000 to prevent response cutoff)
     final_completion = None
     delay = 1.0
     for attempt in range(3):
       try:
         final_completion = await groq_client.chat.completions.create(
-            model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=800
+            model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
         )
         break
       except RateLimitError:
