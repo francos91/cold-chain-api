@@ -6,4 +6,7 @@ streamlit
 pandas
 plotly
 requests
-
+numpy
+scikit-learn
+joblib
+groq
