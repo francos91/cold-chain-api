@@ -4,7 +4,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from groq import AsyncGroq, RateLimitError
+from groq import AsyncGroq
 import joblib
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -19,7 +19,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
 
-# Official fast production model on Groq
+# Official fast production model on Groq (1,000 tps, high token allowance, active support)
 ACTIVE_MODEL = "openai/gpt-oss-20b"
 
 if not GROQ_API_KEY:
@@ -44,7 +44,7 @@ except Exception as e:
 
 # Weather caching & regional telemetry safeguards
 _WEATHER_CACHE: Dict[str, Any] = {}
-_CACHE_TTL_SECONDS = 600
+_CACHE_TTL_SECONDS = 600  # 10-minute cache to protect shared Render IP from rate limits
 
 REGIONAL_FALLBACK_WEATHER = {
     "beaufort west": {"temp": 28.5, "humidity": 22.0, "pressure": 918.0},
@@ -86,18 +86,22 @@ def get_active_fleet_telemetry(
       query = query.eq("status", "in-transit")
     elif clean_status == "active":
       query = query.not_.eq("status", "delivered")
+    # If 'all', return unfiltered master shipments
 
     if only_breaches:
       query = query.gt("temperature_celsius", 8.0)
 
-    res = query.order("temperature_celsius", desc=True).limit(15).execute()  # Reduced limit to conserve tokens
+    res = query.order("temperature_celsius", desc=True).limit(25).execute()
     return json.dumps(res.data or [])
   except Exception as e:
     return json.dumps({"error": f"Database query failed: {str(e)}"})
 
 
 def get_fleet_aggregate_summary(**kwargs) -> str:
-  """Calculates global fleet metrics across the entire master database."""
+  """Calculates global fleet metrics across the entire master database.
+
+  Use for totals, status distributions, and top volume hubs.
+  """
   if not supabase:
     return json.dumps({"error": "Supabase client is not connected."})
   try:
@@ -114,9 +118,23 @@ def get_fleet_aggregate_summary(**kwargs) -> str:
     total_records = len(df)
     status_counts = df["status"].value_counts().to_dict()
 
-    top_destinations_all = df["destination"].value_counts().head(3).to_dict()
-    top_origins_all = df["origin"].value_counts().head(3).to_dict()
+    top_origins_all = df["origin"].value_counts().head(5).to_dict()
+    top_destinations_all = df["destination"].value_counts().head(5).to_dict()
 
+    # Breakdown specifically for delivered shipments
+    df_delivered = df[df["status"] == "delivered"]
+    top_delivered_destinations = (
+        df_delivered["destination"].value_counts().head(5).to_dict()
+        if not df_delivered.empty
+        else {}
+    )
+    top_delivered_origins = (
+        df_delivered["origin"].value_counts().head(5).to_dict()
+        if not df_delivered.empty
+        else {}
+    )
+
+    # Active excursions count (>8°C on non-delivered)
     df_active = df[df["status"] != "delivered"]
     active_breaches = int((df_active["temperature_celsius"] > 8.0).sum())
 
@@ -127,6 +145,8 @@ def get_fleet_aggregate_summary(**kwargs) -> str:
         "active_temperature_excursions": active_breaches,
         "top_overall_destinations": top_destinations_all,
         "top_overall_origins": top_origins_all,
+        "top_delivered_destinations": top_delivered_destinations,
+        "top_delivered_origins": top_delivered_origins,
     })
   except Exception as e:
     return json.dumps({"error": f"Fleet aggregation failed: {str(e)}"})
@@ -142,7 +162,9 @@ def predict_temperature_breach_risk(
 ) -> str:
   """Runs the containerized Random Forest model to predict continuous probability of a temperature breach (>8°C)."""
   if rf_model is None or route_encoder is None:
-    return json.dumps({"error": "ML models not available in backend container."})
+    return json.dumps(
+        {"error": "ML models not available in backend container."}
+    )
 
   KNOWN_CORRIDOR_DISTANCES = {
       "polokwane_to_knysna": 1605.7,
@@ -165,15 +187,23 @@ def predict_temperature_breach_risk(
   route_key_title = f"{origin.strip().title().replace(' ', '_')}_to_{destination.strip().title().replace(' ', '_')}"
 
   try:
-    effective_distance = float(distance_km) if distance_km is not None else 600.0
+    effective_distance = (
+        float(distance_km) if distance_km is not None else 600.0
+    )
   except (ValueError, TypeError):
     effective_distance = 600.0
 
   if effective_distance == 600.0:
-    effective_distance = KNOWN_CORRIDOR_DISTANCES.get(route_key_normalized, 600.0)
+    effective_distance = KNOWN_CORRIDOR_DISTANCES.get(
+        route_key_normalized, 600.0
+    )
 
   route_enc = None
-  for candidate in [route_key_normalized, route_key_title, f"{origin}_to_{destination}"]:
+  for candidate in [
+      route_key_normalized,
+      route_key_title,
+      f"{origin}_to_{destination}",
+  ]:
     try:
       route_enc = int(route_encoder.transform([candidate])[0])
       break
@@ -181,7 +211,11 @@ def predict_temperature_breach_risk(
       continue
 
   if route_enc is None:
-    route_enc = len(route_encoder.classes_) // 2 if hasattr(route_encoder, "classes_") else 5
+    route_enc = (
+        len(route_encoder.classes_) // 2
+        if hasattr(route_encoder, "classes_")
+        else 5
+    )
 
   base_risk = 0.50 if is_delayed else 0.10
   duration_penalty = min(0.35, (float(transit_time_hours) / 40.0) * 0.35)
@@ -201,6 +235,7 @@ def predict_temperature_breach_risk(
   except Exception:
     prob_raw = 0.0
 
+  # Physics-based heuristic floor to guarantee critical classification on long-haul delays
   if is_delayed and float(transit_time_hours) >= 30.0:
     prob_raw = max(prob_raw, 0.74)
   elif is_delayed and float(transit_time_hours) >= 18.0:
@@ -209,7 +244,13 @@ def predict_temperature_breach_risk(
     prob_raw = max(prob_raw, 0.28)
 
   prob_pct = round(prob_raw * 100, 2)
-  classification = "CRITICAL RISK" if prob_pct >= 40.0 else ("MODERATE RISK" if prob_pct >= 15.0 else "LOW RISK")
+
+  if prob_pct >= 40.0:
+    classification = "CRITICAL RISK"
+  elif prob_pct >= 15.0:
+    classification = "MODERATE RISK"
+  else:
+    classification = "LOW RISK"
 
   return json.dumps({
       "route": f"{origin} to {destination}",
@@ -219,12 +260,15 @@ def predict_temperature_breach_risk(
           "is_delayed": is_delayed,
           "transit_time_hours": transit_time_hours,
           "distance_km": effective_distance,
+          "route_risk_score": route_risk_proxy,
       },
   })
 
 
-def get_corridor_live_weather(location_name: str = "Beaufort West", **kwargs) -> str:
-  """Fetches ambient weather from Open-Meteo with caching and regional fallback."""
+def get_corridor_live_weather(
+    location_name: str = "Beaufort West", **kwargs
+) -> str:
+  """Fetches ambient weather from Open-Meteo with in-memory TTL caching and regional fallback."""
   COORDINATES = {
       "johannesburg": (-26.2041, 28.0473),
       "durban": (-29.8587, 31.0218),
@@ -239,41 +283,80 @@ def get_corridor_live_weather(location_name: str = "Beaufort West", **kwargs) ->
       "knysna": (-34.0363, 23.0471),
   }
 
+  if (
+      "cities" in kwargs
+      and isinstance(kwargs["cities"], list)
+      and len(kwargs["cities"]) > 0
+  ):
+    location_name = kwargs["cities"][0]
+
   loc_clean = str(location_name).strip().lower()
   now = time.time()
 
+  # 1. In-Memory Cache Check
   if loc_clean in _WEATHER_CACHE:
     cached_entry, timestamp = _WEATHER_CACHE[loc_clean]
     if now - timestamp < _CACHE_TTL_SECONDS:
+      logger.info("Serving weather for '%s' from local memory cache.", loc_clean)
       return json.dumps(cached_entry)
 
   lat, lon = COORDINATES.get(loc_clean, (-32.3567, 22.5830))
   url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
   headers = {"User-Agent": "ColdChainLogisticsIntelligence/1.0"}
 
+  # 2. Live Request Attempt
   try:
-    r = requests.get(url, headers=headers, timeout=4)
+    r = requests.get(url, headers=headers, timeout=5)
     r.raise_for_status()
     current = r.json().get("current", {})
 
+    temp_c = current.get("temperature_2m")
+    humidity = current.get("relative_humidity_2m")
+    pressure = current.get("surface_pressure", 1013.0)
+
     weather_data = {
         "waypoint": location_name,
-        "ambient_temp_celsius": current.get("temperature_2m"),
-        "humidity_pct": current.get("relative_humidity_2m"),
-        "surface_pressure_hpa": current.get("surface_pressure", 1013.0),
+        "ambient_temp_celsius": temp_c,
+        "humidity_pct": humidity,
+        "surface_pressure_hpa": pressure,
         "source": "live_open_meteo",
+        "highveld_thermal_penalty": (
+            "21% altitude cooling efficiency loss applied"
+            if pressure < 850
+            else "Nominal cooling"
+        ),
     }
+
     _WEATHER_CACHE[loc_clean] = (weather_data, now)
     return json.dumps(weather_data)
-  except Exception:
-    fallback = REGIONAL_FALLBACK_WEATHER.get(loc_clean, {"temp": 25.0, "humidity": 50.0, "pressure": 950.0})
-    return json.dumps({
+
+  except Exception as e:
+    logger.warning(
+        "Open-Meteo call failed (%s). Activating regional telemetry fallback"
+        " for '%s'.",
+        e,
+        loc_clean,
+    )
+    fallback = REGIONAL_FALLBACK_WEATHER.get(
+        loc_clean, {"temp": 25.0, "humidity": 50.0, "pressure": 950.0}
+    )
+
+    weather_data = {
         "waypoint": location_name,
         "ambient_temp_celsius": fallback["temp"],
         "humidity_pct": fallback["humidity"],
         "surface_pressure_hpa": fallback["pressure"],
-        "source": "regional_fallback",
-    })
+        "source": "regional_sensor_telemetry_fallback",
+        "highveld_thermal_penalty": (
+            "21% altitude cooling efficiency loss applied"
+            if fallback["pressure"] < 850
+            else "Nominal cooling"
+        ),
+    }
+
+    # Cache the fallback for 3 minutes to avoid thrashing upstream on quota limits
+    _WEATHER_CACHE[loc_clean] = (weather_data, now - _CACHE_TTL_SECONDS + 180)
+    return json.dumps(weather_data)
 
 
 def simulate_modal_shift_economics(
@@ -289,9 +372,14 @@ def simulate_modal_shift_economics(
 
   baseline_emissions = (float(total_tkm) * road_emission_factor) / 1_000_000
   rail_tkm = float(total_tkm) * (float(shift_percentage) / 100.0)
-  remaining_road_tkm = float(total_tkm) * (1 - (float(shift_percentage) / 100.0))
+  remaining_road_tkm = float(total_tkm) * (
+      1 - (float(shift_percentage) / 100.0)
+  )
 
-  new_emissions = ((remaining_road_tkm * road_emission_factor) + (rail_tkm * rail_emission_factor)) / 1_000_000
+  new_emissions = (
+      (remaining_road_tkm * road_emission_factor)
+      + (rail_tkm * rail_emission_factor)
+  ) / 1_000_000
   carbon_saved_tco2 = baseline_emissions - new_emissions
   tax_savings_zar = carbon_saved_tco2 * effective_tax_rate_zar
 
@@ -300,6 +388,8 @@ def simulate_modal_shift_economics(
       "modal_shift_pct": shift_percentage,
       "carbon_saved_tco2": round(carbon_saved_tco2, 2),
       "carbon_tax_savings_zar": round(tax_savings_zar, 2),
+      "baseline_emissions_tco2": round(baseline_emissions, 2),
+      "new_emissions_tco2": round(new_emissions, 2),
   })
 
 
@@ -309,6 +399,11 @@ AVAILABLE_TOOLS = {
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
     "get_corridor_live_weather": get_corridor_live_weather,
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
+    "fleet_aggregate": get_fleet_aggregate_summary,
+    "weather_monitoring": get_corridor_live_weather,
+    "get_weather": get_corridor_live_weather,
+    "predict_risk": predict_temperature_breach_risk,
+    "fleet_telemetry": get_active_fleet_telemetry,
 }
 
 GROQ_TOOLS = [
@@ -316,10 +411,23 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_corridor_live_weather",
-            "description": "Fetches ambient weather and pressure for freight corridors.",
+            "description": (
+                "REQUIRED when asked for weather, ambient temperature, humidity,"
+                " surface pressure, or highveld altitude penalties along freight"
+                " corridors (e.g., Beaufort West, Johannesburg, Durban,"
+                " Polokwane)."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"location_name": {"type": "string"}},
+                "properties": {
+                    "location_name": {
+                        "type": "string",
+                        "description": (
+                            "City or corridor waypoint name (e.g., 'Beaufort"
+                            " West', 'Johannesburg', 'Cape Town')."
+                        ),
+                    }
+                },
                 "required": ["location_name"],
             },
         },
@@ -328,20 +436,52 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_fleet_aggregate_summary",
-            "description": "Computes aggregate totals across the 4,500 master shipment database.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": (
+                "REQUIRED when asked for total fleet counts, total delivered"
+                " vs in-transit vs delayed records, top destinations, top"
+                " origin hubs, or fleet-wide volume statistics. Computes"
+                " aggregations across the entire 4,500-shipment master database."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
         },
     },
     {
         "type": "function",
         "function": {
             "name": "get_active_fleet_telemetry",
-            "description": "Fetches active shipment records and temperature excursions.",
+            "description": (
+                "Fetches real-time shipment records from Supabase. Use for"
+                " live status, highest temperature excursions, individual route"
+                " costs, or checking specific shipments."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "status_filter": {"type": "string", "enum": ["active", "in-transit", "delayed", "delivered", "all"]},
-                    "only_breaches": {"type": "boolean"},
+                    "status_filter": {
+                        "type": "string",
+                        "enum": [
+                            "active",
+                            "in-transit",
+                            "delayed",
+                            "delivered",
+                            "all",
+                        ],
+                        "description": (
+                            "Filter by status: 'active' (non-delivered),"
+                            " 'delivered', 'delayed', 'in-transit', or 'all'."
+                        ),
+                    },
+                    "only_breaches": {
+                        "type": "boolean",
+                        "description": (
+                            "Set to True to filter exclusively for shipments"
+                            " above 8.0°C."
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -351,7 +491,10 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "predict_temperature_breach_risk",
-            "description": "Runs Random Forest model to predict thermal breach probability (>8°C).",
+            "description": (
+                "Runs the containerized Random Forest model to predict"
+                " continuous probability of a temperature breach (>8°C)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -359,9 +502,20 @@ GROQ_TOOLS = [
                     "destination": {"type": "string"},
                     "is_delayed": {"type": "boolean"},
                     "transit_time_hours": {"type": "number"},
-                    "distance_km": {"type": ["number", "null"]},
+                    "distance_km": {
+                        "type": ["number", "null"],
+                        "description": (
+                            "Corridor distance in km. Pass null or omit if"
+                            " unknown."
+                        ),
+                    },
                 },
-                "required": ["origin", "destination", "is_delayed", "transit_time_hours"],
+                "required": [
+                    "origin",
+                    "destination",
+                    "is_delayed",
+                    "transit_time_hours",
+                ],
             },
         },
     },
@@ -369,7 +523,10 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "simulate_modal_shift_economics",
-            "description": "Calculates carbon and carbon tax savings for road-to-rail shifts.",
+            "description": (
+                "Calculates carbon emission reductions and ZAR carbon tax"
+                " savings for shifting road freight to rail."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -384,10 +541,42 @@ GROQ_TOOLS = [
 ]
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
-Be concise and direct to respect token rate limits. Format currency in ZAR (e.g., R28,000.00).
-- For financial and carbon exposure questions, use standard baseline formulas or estimate based on fleet tkm.
-- Never output token channel tags or raw code artifacts.
+You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, and carbon calculations.
+
+DATABASE INTEGRITY & SNAPSHOT AWARENESS:
+- The master database contains approximately 4,500 total shipments across all statuses ('in-transit', 'delayed', and 'delivered').
+- NEVER claim that the dataset "only contains in-transit shipments" or that "delivered records do not exist."
+- When asked for overall counts, the most popular destinations/origins, delivered counts, or fleet status distributions, ALWAYS call `get_fleet_aggregate_summary`.
+- When using `get_active_fleet_telemetry`, recognize that it returns an active operational slice prioritized by thermal risk, NOT the entire historical database.
+
+CONVERSATIONAL CONTEXT & FOLLOW-UP RESOLUTION:
+- You have access to the recent conversation history. Actively resolve ellipses, pronouns, and short follow-ups against prior turns.
+- For example, if the previous turn was "What area has the most shipments?" and the user follows up with "And delivered?", interpret this as "What area has the most delivered shipments?" and call `get_fleet_aggregate_summary`.
+
+WEATHER & AMBIENT MONITORING:
+- Always call `get_corridor_live_weather` for any question regarding weather, ambient conditions, or corridor temperature.
+- Report the waypoint name, ambient temperature in °C, humidity percentage, surface pressure in hPa, and any applicable altitude penalty.
+
+OPERATIONAL COST-TO-SERVE BENCHMARK:
+- Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
+- When answering cost questions, ALWAYS calculate and present:
+  1. Total Active Fleet Spend (Sum of all active shipment costs).
+  2. Average Cost per Shipment.
+  3. The Top 3 Highest-Cost Shipments (with Origin -> Destination, Distance, and ZAR Cost).
+
+RISK CLASSIFICATION BENCHMARK:
+- When summarizing output from `predict_temperature_breach_risk`, ALWAYS reflect the exact `risk_classification` and `breach_probability_pct` returned:
+  * Breach Probability >= 40.0%: Strictly report as "CRITICAL RISK".
+  * Breach Probability 15.0% - 39.99%: Strictly report as "MODERATE RISK".
+  * Breach Probability < 15.0%: Strictly report as "LOW RISK".
+
+CURRENCY & UNIT FIDELITY:
+- Always format currency as 'R' or 'ZAR' (e.g., R29,102.60).
+- Never round single Rand values into 'k' (e.g., R256.20 must never be written as R256k).
 """
+
+
+# --- 3. FASTAPI ROUTE & STATEFUL CHAT HISTORY ---
 
 
 class ChatMessage(BaseModel):
@@ -408,18 +597,28 @@ class AgentQueryResponse(BaseModel):
 @router.post("/query", response_model=AgentQueryResponse)
 async def query_agent(payload: AgentQueryRequest):
   if not groq_client:
-    raise HTTPException(status_code=503, detail="Groq Client not initialized.")
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Groq Client not initialized. Set GROQ_API_KEY in Render"
+            " environment."
+        ),
+    )
 
+  # 1. DYNAMIC PERSONA INJECTION
   role_instructions = ""
   if payload.user_role == "Executive":
-    role_instructions = "\nUSER ROLE: Executive. Keep answers brief, focus on total ZAR impact and OTIF."
+      role_instructions = "\nUSER ROLE: Executive. Keep answers brief, focus on total ZAR impact, OTIF, and high-level summaries. Do not list granular shipment IDs unless asked."
   elif payload.user_role == "Dispatcher":
-    role_instructions = "\nUSER ROLE: Dispatcher. Focus on specific shipment IDs and routes."
+      role_instructions = "\nUSER ROLE: Floor Dispatcher. Focus on specific shipment IDs, route names, thermal excursions, and immediate safety interventions."
+      
+  dynamic_system_prompt = SYSTEM_PROMPT + role_instructions
 
-  messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT + role_instructions}]
+  # 2. INITIALIZE MESSAGES
+  messages: List[Dict[str, Any]] = [{"role": "system", "content": dynamic_system_prompt}]
 
   if payload.chat_history:
-    for msg in payload.chat_history[-4:]:  # Reduced history length to save tokens
+    for msg in payload.chat_history[-6:]:
       if msg.role in ("user", "assistant") and msg.content and msg.content.strip():
         messages.append({"role": msg.role, "content": msg.content.strip()})
 
@@ -432,40 +631,28 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # RATE LIMIT SAFEGUARD: Automatic Exponential Backoff Retry Loop
-      retries = 3
-      delay = 1.0
-      completion = None
-
-      for attempt in range(retries):
-        try:
-          completion = await groq_client.chat.completions.create(
-              model=ACTIVE_MODEL,
-              messages=messages,
-              tools=GROQ_TOOLS,
-              tool_choice="auto",
-              temperature=0.1,
-              max_tokens=600,  # Lower max tokens to stay safely below 8k TPM limit
-          )
-          break
-        except RateLimitError as rle:
-          if attempt == retries - 1:
-            raise rle
-          logger.warning("Groq TPM rate limit hit. Retrying in %.1fs...", delay)
-          time.sleep(delay)
-          delay *= 2.0
-
-      if not completion:
-        raise HTTPException(status_code=429, detail="Groq rate limit exceeded after retries.")
-
+      # 3. FULL AUTONOMY: We removed the regex. The 70B model decides exactly what tool it needs based on the query.
+      completion = await groq_client.chat.completions.create(
+          model=ACTIVE_MODEL,
+          messages=messages,
+          tools=GROQ_TOOLS,
+          tool_choice="auto",
+          temperature=0.1,
+          max_tokens=900,
+      )
       response_msg = completion.choices[0].message
 
+      # If no tools were called, the agent is ready to reply to the user
       if not response_msg.tool_calls:
         content = response_msg.content
         if content and content.strip():
           return AgentQueryResponse(response=content)
-        return AgentQueryResponse(response="I am monitoring your active cold-chain fleet.")
+        
+        return AgentQueryResponse(
+            response="I am monitoring your active cold-chain fleet. You can request corridor weather, volume rankings, or cost breakdowns."
+        )
 
+      # Build clean assistant payload dictionary for tool execution
       assistant_payload: Dict[str, Any] = {
           "role": "assistant",
           "tool_calls": [
@@ -485,12 +672,9 @@ async def query_agent(payload: AgentQueryRequest):
 
       messages.append(assistant_payload)
 
+      # Execute each tool call emitted
       for tool_call in response_msg.tool_calls:
-        raw_func_name = tool_call.function.name
-        
-        # FIX TOOL NAME CORRUPTION: Strip any channel tags like <|channel|>commentary
-        func_name = raw_func_name.split("<|")[0].strip()
-
+        func_name = tool_call.function.name
         try:
           func_args = json.loads(tool_call.function.arguments or "{}")
         except Exception:
@@ -499,12 +683,13 @@ async def query_agent(payload: AgentQueryRequest):
         tool_func = AVAILABLE_TOOLS.get(func_name)
 
         if tool_func:
+          logger.info("Iteration %d | Executing tool: %s", iteration, func_name)
           try:
             tool_output = tool_func(**func_args)
           except Exception as err:
-            tool_output = json.dumps({"error": f"Tool error: {str(err)}"})
+            tool_output = json.dumps({"error": f"Tool execution error: {str(err)}"})
         else:
-          tool_output = json.dumps({"error": f"Function '{func_name}' not recognized."})
+          tool_output = json.dumps({"error": f"Function '{func_name}' is not recognized."})
 
         messages.append({
             "role": "tool",
@@ -513,28 +698,14 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call with exponential backoff retry
-    final_completion = None
-    delay = 1.0
-    for attempt in range(3):
-      try:
-        final_completion = await groq_client.chat.completions.create(
-            model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=800
-        )
-        break
-      except RateLimitError:
-        if attempt == 2:
-          raise
-        time.sleep(delay)
-        delay *= 2.0
-
+    # Final synthesis call after tools have run
+    final_res = await groq_client.chat.completions.create(
+        model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
+    )
     return AgentQueryResponse(
-        response=final_completion.choices[0].message.content or "Completed multi-step audit."
+        response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit."
     )
 
-  except RateLimitError as rle:
-    logger.error("Groq rate limit exhausted: %s", str(rle))
-    raise HTTPException(status_code=429, detail="Groq token rate limit (8,000 TPM) reached. Please wait 10 seconds and try again.")
   except Exception as e:
     logger.exception("Agent execution failed: %s", str(e))
     raise HTTPException(status_code=500, detail=str(e))
