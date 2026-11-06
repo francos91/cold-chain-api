@@ -298,8 +298,25 @@ async def query_agent(payload: AgentQueryRequest):
 
         # Handle tool calling
         if response_msg.tool_calls:
-            # Append model's assistant turn with tool calls
-            messages.append(response_msg.model_dump())
+            # Format clean tool_calls payload to strip unsupported SDK fields (e.g., 'annotations')
+            clean_tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in response_msg.tool_calls
+            ]
+
+            # Append sanitized assistant message dictionary
+            messages.append({
+                "role": "assistant",
+                "content": response_msg.content or "",
+                "tool_calls": clean_tool_calls,
+            })
 
             for tool_call in response_msg.tool_calls:
                 func_name = tool_call.function.name
