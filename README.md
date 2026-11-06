@@ -11,7 +11,7 @@ An enterprise-grade, end-to-end data pipeline and decision-support architecture 
 ## Microservices & Docker Architecture (V2 Upgrade)
 The system has been upgraded from a monolithic structure to a decoupled microservices architecture:
 - **Backend API (Docker + Render)**: The core logic is containerized using a custom Dockerfile (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`), running feature transformations, and hosting dedicated data and telemetry routes.
-- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, Random Forest model inference, and intermodal carbon tax calculators.
+- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, master database aggregation routines, Random Forest model inference, and intermodal carbon tax calculators.
 - **Frontend Client (`Overview.py` & Multi-Page Suite)**: The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex database queries locally. Instead, it consumes pre-processed datasets, telemetry streams, and agent endpoints directly from the Dockerized FastAPI backend.
 - **Data Ingestion Sanitation**: Automatic normalization standardizes shipment status values (`in-transit`, `delayed`, `delivered`) across the API and frontend caches, eliminating duplicate entries in the filter dropdowns and analytics charts.
 - **Parallel Hosting**: Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards run concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
@@ -21,22 +21,25 @@ This pipeline was developed to address the challenge of real-time logistics moni
 
 ## System Architecture
 
+![System Architecture v5](system_architecture_v5.png)
+
 ### Technical Architecture
 - **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to ingest telemetry data and serve analytical payloads in real time.
 - **AI Agent Copilot (Groq LPU Engine)**: A dedicated reasoning layer (`Backend/agent.py`) using `openai/gpt-oss-20b` with autonomous multi-turn tool calling:
-  * `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions (> 8.0°C) and calculate fleet-wide cost-to-serve metrics.
+  * `get_fleet_aggregate_summary`: Executes whole-database aggregations across all 4,500 records in Supabase PostgreSQL to calculate global status distributions (`delivered`, `in-transit`, `delayed`), top origin hubs, and leading delivery destinations without row-slice hallucination.
+  * `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions (> 8.0°C), supporting granular status filters (`active`, `in-transit`, `delayed`, `delivered`, `all`) and calculating fleet-wide cost-to-serve metrics.
   * `predict_temperature_breach_risk`: Containerized Random Forest inference with dynamic route distance lookups, nullable schema validation, and physics-based heuristic floors for what-if route dispatches.
-  * `get_corridor_live_weather`: Open-Meteo integration for ambient temperature, humidity, and Highveld pressure drops (< 850 hPa cooling efficiency loss).
+  * `get_corridor_live_weather`: Open-Meteo integration backed by a 10-minute in-memory TTL cache and deterministic South African regional climatology fallbacks (Karoo, Highveld, Coastal) to eliminate upstream HTTP 429 rate-limiting on shared container egress IPs.
   * `simulate_modal_shift_economics`: Activity-based carbon accounting and South African Carbon Tax savings (R28.00/tCO2) under statutory basic tax exemptions.
+- **Stateful Conversational Memory**: The `/api/v1/agent/query` route accepts an optional `chat_history` payload from Streamlit. Recent conversation turns are sanitized and injected into the Groq message context, allowing the Copilot to resolve ellipses, pronouns, and contextual follow-up inquiries (e.g., resolving *"And delivered?"* directly following *"What area has the most shipments?"*).
 - **Dual-Table Data Storage**: Supabase (PostgreSQL) serves as the primary cloud database utilizing a relational dual-table structure:
-  * `cold_chain_tracking`: The master table storing shipment records, statuses, distances, transit hours, and dynamic cargo weights.
+  * `cold_chain_tracking`: The master table storing 4,500 shipment records, statuses, distances, transit hours, and dynamic cargo weights.
   * `temperature_stream`: A time-series table storing high-frequency OSRM-generated GPS coordinates and thermodynamic temperature fluctuations.
 - **Frontend Dashboard (Streamlit Cloud)**: A multi-page control tower (`pages/`) that processes live data, identifies temperature excursions, quantifies carbon emissions, and visualizes route risk scores:
   * `1_Risk_Intelligence.py`: Dynamic breach probability slider with partial-page rendering via `@st.fragment`.
   * `2_Thermal_Tracking.py`: High-frequency temperature curves matched against corridor averages and GPS route maps.
   * `3_Intermodal_Simulator.py`: Road vs. rail freight shift modeling under ISO 14083 emissions factors.
-  * `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent.
-
+  * `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent with stateful conversation context passing.
 ## Repository Structure
 ```
 cold-chain-api/
@@ -91,14 +94,16 @@ This is the core predictive model operating inside the Control Tower. It evaluat
 This repository implements rigorous software engineering practices tailored for industrial logistics systems:
 * **Automated CI/CD**: Powered by GitHub Actions (`.github/workflows/ci.yml`), running automated linting, test suites, and mock environment builds on every push.
 * **Unit Test Suite (`tests/`)**: 
+  - `test_agent_memory_and_aggregation.py`: Evaluates multi-turn context retention, anaphora follow-up resolution, master database delivered aggregations, and stateless backward compatibility.
   - `test_api.py`: Validates FastAPI backend response contracts, JSON schema stability, and agent endpoints.
   - `test_physics.py`: Verifies ISO 14083 carbon accounting, effective tax rate calculations (R28.00/tCO2), and cost-to-serve mathematics.
   - `test_thermal.py`: Validates thermal excursion boundary logic and thermodynamic drift thresholds for perishable cargo safety.
   - `test_ml_model.py`: Checks feature shape alignment and inference reliability for machine learning models.
 
 ## Key Features
-- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b`), capable of multi-turn tool execution, comparative what-if route evaluations, and deterministic intent fallbacks.
-- **Real-Time Corridor Weather Integration**: Live Open-Meteo connection tracking Karoo heatwaves and Highveld altitude-related cooling efficiency penalties (21% loss for surface pressure < 850 hPa).
+- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b`), capable of multi-turn tool execution, stateful conversation memory across turns, and deterministic intent fallbacks.
+- **Master Fleet Aggregation Intelligence**: A dedicated analytics tool (`get_fleet_aggregate_summary`) providing instant counts across all ~4,500 historical shipments, eliminating LLM sampling bias and distinguishing delivered cargo from active in-transit shipments.
+- **Resilient Real-Time Weather Integration**: Live Open-Meteo connection tracking Karoo heatwaves and Highveld altitude-related cooling efficiency penalties (21% loss for surface pressure < 850 hPa), shielded against container rate limits via an in-memory TTL cache and regional seasonal fallbacks.
 - **Continuous Predictive Risk Intelligence**: Integrates continuous physical constraints (`distance_km` and `transit_time_hours`) into the feature space alongside categorical route data to smooth the Random Forest probability distribution for granular, dynamic thresholding.
 - **Dynamic Risk Threshold Slider**: An interactive decision-support tool (5% – 95%) leveraging `@st.fragment` rendering to update leaderboards instantly without full-page reloads or redundant database queries.
 - **Actionable High-Risk Leaderboard**: Displays the highest-risk active shipments sorted by probability score. Automatically excludes already-delivered shipments, focusing operations managers strictly on active fleet assets where intervention is still possible.
@@ -157,7 +162,10 @@ South Africa-Specific Literature Sources:
 - [x] Deploy Groq LPU-powered AI Control Tower Copilot with native tool-calling across database, weather, ML, and carbon economics.
 - [x] Harden tool-calling schemas with nullable parameter contracts and physical domain heuristic floors.
 - [x] Sanitize data caching layers to eliminate multi-status duplicate values.
-- [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets under Eskom Megaflex tariffs and grid constraints (Master's Research Proposal core objective).
+- [x] Implement stateful multi-turn conversational memory with ellipsis and anaphora resolution in `Backend/agent.py`.
+- [x] Integrate master database aggregation tooling (`get_fleet_aggregate_summary`) to eliminate delivered shipment hallucinations.
+- [x] Deploy resilient weather telemetry using in-memory TTL caching and regional South African climatology fallbacks to counter HTTP 429 rate limits.
+- [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets incorporating KERS downhill physics, Virtual Wheeling PPA arbitrage, and Eskom Megaflex tariffs (Master's Research Proposal core objective).
 - [ ] Implement automated push notifications (Email/SMS webhook) for active fleet temperature excursions.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
 - [ ] Extend the Random Forest model with XGBoost or LightGBM to improve prediction accuracy.
@@ -171,3 +179,4 @@ To view a copy of this license, visit https://creativecommons.org/licenses/by-nc
 Under this license:
 - You are free to view, share, and adapt this work for academic, educational, or non-commercial research purposes.
 - Commercial exploitation, resale, or closed-source redistribution without prior written consent from the author is strictly prohibited.
+
