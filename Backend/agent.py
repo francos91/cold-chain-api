@@ -1,29 +1,28 @@
 import os
 import json
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 import requests
 import joblib
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from supabase import create_client, Client
-from google import genai
-from google.genai import types
+from groq import AsyncGroq
 
 logger = logging.getLogger("coldchain-agent")
 router = APIRouter(prefix="/api/v1/agent", tags=["AI Operations Copilot"])
 
 # 1. Environment variables
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-if not GEMINI_API_KEY:
-    logger.warning("GEMINI_API_KEY is not set in environment.")
+if not GROQ_API_KEY:
+    logger.warning("GROQ_API_KEY is not set in environment.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Load containerized ML assets
 try:
@@ -35,13 +34,10 @@ except Exception as e:
     rf_model, route_encoder = None, None
 
 
-# --- 2. EXECUTABLE TOOLS FOR GEMINI ---
+# --- 2. EXECUTABLE TOOLS ---
 
 def get_active_fleet_telemetry(only_breaches: bool = False) -> str:
-    """
-    Fetches live telemetry for active (non-delivered) shipments from Supabase.
-    Set only_breaches=True to filter exclusively for shipments above the 8.0°C safety threshold.
-    """
+    """Fetches live telemetry for active shipments from Supabase."""
     try:
         query = (
             supabase.table("cold_chain_tracking")
@@ -56,13 +52,10 @@ def get_active_fleet_telemetry(only_breaches: bool = False) -> str:
         return json.dumps({"error": f"Database query failed: {str(e)}"})
 
 
-def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: bool, transit_time_hours: float, distance_km: float = 600.0) -> dict:
-    """
-    Runs the containerized 5-Feature Random Forest classifier to predict the continuous probability of a Cold Chain breach (>8°C).
-    Use this for what-if scenarios, dispatch scheduling, and custom delay inquiries.
-    """
+def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: bool, transit_time_hours: float, distance_km: float = 600.0) -> str:
+    """Runs the containerized Random Forest model to predict continuous probability of a temperature breach (>8°C)."""
     if rf_model is None or route_encoder is None:
-        return {"error": "ML models not available in backend container."}
+        return json.dumps({"error": "ML models not available in backend container."})
 
     route_key = f"{origin}_to_{destination}"
     try:
@@ -82,7 +75,7 @@ def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: b
     }])
 
     prob = float(rf_model.predict_proba(features)[0, 1])
-    return {
+    return json.dumps({
         "route": route_key,
         "breach_probability_pct": round(prob * 100, 2),
         "risk_classification": "CRITICAL RISK" if prob > 0.40 else "MODERATE RISK" if prob > 0.15 else "LOW RISK",
@@ -91,14 +84,11 @@ def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: b
             "transit_time_hours": transit_time_hours,
             "distance_km": distance_km
         }
-    }
+    })
 
 
-def get_corridor_live_weather(location_name: str) -> dict:
-    """
-    Fetches real-time ambient weather (temperature, humidity, pressure) from Open-Meteo.
-    Supported key South African waypoints: 'Johannesburg', 'Durban', 'Cape Town', 'Beaufort West', 'Bloemfontein', 'Harrismith'.
-    """
+def get_corridor_live_weather(location_name: str) -> str:
+    """Fetches real-time ambient weather from Open-Meteo."""
     COORDINATES = {
         "johannesburg": (-26.2041, 28.0473),
         "durban": (-29.8587, 31.0218),
@@ -113,22 +103,19 @@ def get_corridor_live_weather(location_name: str) -> dict:
         r = requests.get(url, timeout=5)
         r.raise_for_status()
         current = r.json().get("current", {})
-        return {
+        return json.dumps({
             "waypoint": location_name,
             "ambient_temp_celsius": current.get("temperature_2m"),
             "humidity_pct": current.get("relative_humidity_2m"),
             "surface_pressure_hpa": current.get("surface_pressure"),
             "highveld_thermal_penalty": "21% altitude cooling efficiency loss applied" if current.get("surface_pressure", 1013) < 850 else "Nominal cooling"
-        }
+        })
     except Exception as e:
-        return {"error": f"Weather fetch failed: {str(e)}"}
+        return json.dumps({"error": f"Weather fetch failed: {str(e)}"})
 
 
-def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, total_tkm: float = 600000.0) -> dict:
-    """
-    Calculates carbon emission reductions and South African Carbon Tax savings (R28.00/tonne) for shifting road freight to rail.
-    Corridors: 'Johannesburg_to_Durban (Natcor)' or 'Johannesburg_to_Cape_Town (Capecor)'.
-    """
+def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, total_tkm: float = 600000.0) -> str:
+    """Calculates carbon reductions and South African Carbon Tax savings (R28.00/tonne)."""
     road_emission_factor = 73.2
     rail_emission_factor = 12.2
     effective_tax_rate_zar = 28.0
@@ -141,26 +128,96 @@ def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, t
     carbon_saved_tco2 = baseline_emissions - new_emissions
     tax_savings_zar = carbon_saved_tco2 * effective_tax_rate_zar
 
-    return {
+    return json.dumps({
         "corridor": corridor_key,
         "modal_shift_pct": shift_percentage,
         "carbon_saved_tco2": round(carbon_saved_tco2, 2),
         "carbon_tax_savings_zar": round(tax_savings_zar, 2),
         "baseline_emissions_tco2": round(baseline_emissions, 2),
         "new_emissions_tco2": round(new_emissions, 2)
-    }
+    })
 
+
+AVAILABLE_TOOLS = {
+    "get_active_fleet_telemetry": get_active_fleet_telemetry,
+    "predict_temperature_breach_risk": predict_temperature_breach_risk,
+    "get_corridor_live_weather": get_corridor_live_weather,
+    "simulate_modal_shift_economics": simulate_modal_shift_economics,
+}
+
+GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_fleet_telemetry",
+            "description": "Fetches live telemetry for active (non-delivered) shipments from Supabase.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "only_breaches": {
+                        "type": "boolean",
+                        "description": "Set to True to filter exclusively for shipments above 8.0°C."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "predict_temperature_breach_risk",
+            "description": "Runs the containerized Random Forest model to predict continuous probability of a temperature breach (>8°C).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "string"},
+                    "destination": {"type": "string"},
+                    "is_delayed": {"type": "boolean"},
+                    "transit_time_hours": {"type": "number"},
+                    "distance_km": {"type": "number"}
+                },
+                "required": ["origin", "destination", "is_delayed", "transit_time_hours"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_corridor_live_weather",
+            "description": "Fetches ambient weather and altitude pressure for key corridors (e.g., Beaufort West, Johannesburg, Durban).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location_name": {"type": "string"}
+                },
+                "required": ["location_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "simulate_modal_shift_economics",
+            "description": "Calculates carbon emission reductions and ZAR carbon tax savings for shifting road freight to rail.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "corridor_key": {"type": "string"},
+                    "shift_percentage": {"type": "number"},
+                    "total_tkm": {"type": "number"}
+                },
+                "required": ["corridor_key", "shift_percentage"]
+            }
+        }
+    }
+]
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for a South African Cold Chain Logistics Network.
 You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, and carbon calculations.
 
-You have access to 4 specific tools:
-1. `get_active_fleet_telemetry`: Use ONLY when asked about current fleet status, active loads, or temperature excursions (>8.0°C).
-2. `predict_temperature_breach_risk`: Use ONLY when asked to predict risk or evaluate what-if delay scenarios.
-3. `get_corridor_live_weather`: Use ONLY when asked about ambient temperature, weather, or corridor altitude conditions.
-4. `simulate_modal_shift_economics`: Use ONLY when asked about road-to-rail modal shifts or carbon tax savings.
-
-Important: For normal conversational input (e.g. 'hi', 'hello', 'who are you', 'help'), DO NOT call any tool. Respond directly, politely, and state what capabilities you can perform.
+For general greetings or conversational prompts (e.g., 'hi', 'who are you', 'help'), reply directly and politely without calling any tools.
+Use tools only when specific operational metrics, telemetry, risk scenarios, weather, or carbon shifts are requested.
 """
 
 
@@ -175,49 +232,63 @@ class AgentQueryResponse(BaseModel):
 
 @router.post("/query", response_model=AgentQueryResponse)
 async def query_agent(payload: AgentQueryRequest):
-    if not ai_client:
+    if not groq_client:
         raise HTTPException(
             status_code=503,
-            detail="Gemini API Client not initialized. Set GEMINI_API_KEY in Render environment."
+            detail="Groq Client not initialized. Set GROQ_API_KEY in Render environment."
         )
 
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        tools=[
-            get_active_fleet_telemetry,
-            predict_temperature_breach_risk,
-            get_corridor_live_weather,
-            simulate_modal_shift_economics
-        ],
-        tool_config=types.ToolConfig(
-            function_calling_config=types.FunctionCallingConfig(
-                mode="AUTO"
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": payload.user_query}
+    ]
+
+    try:
+        completion = await groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            tools=GROQ_TOOLS,
+            tool_choice="auto",
+            temperature=0.1,
+            max_tokens=800
+        )
+        response_msg = completion.choices[0].message
+
+        # Handle tool calling
+        if response_msg.tool_calls:
+            messages.append(response_msg)
+
+            for tool_call in response_msg.tool_calls:
+                func_name = tool_call.function.name
+                func_args = json.loads(tool_call.function.arguments or "{}")
+                tool_func = AVAILABLE_TOOLS.get(func_name)
+
+                if tool_func:
+                    logger.info("Executing tool: %s with args: %s", func_name, func_args)
+                    try:
+                        tool_output = tool_func(**func_args)
+                    except Exception as err:
+                        tool_output = json.dumps({"error": f"Tool execution error: {str(err)}"})
+                else:
+                    tool_output = json.dumps({"error": f"Function {func_name} not found"})
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": func_name,
+                    "content": tool_output
+                })
+
+            final_res = await groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=800
             )
-        ),
-        max_output_tokens=800,
-    )
+            return AgentQueryResponse(response=final_res.choices[0].message.content or "")
 
-    # Use currently supported active models: gemini-3.8-flash and dynamic flash alias
-    candidate_models = ["gemini-3.8-flash", "gemini-flash-latest"]
-    last_err = None
+        return AgentQueryResponse(response=response_msg.content or "Ready for your operations query.")
 
-    for model_name in candidate_models:
-        try:
-            logger.info("Executing async agent query with model: %s", model_name)
-            response = await ai_client.aio.models.generate_content(
-                model=model_name,
-                contents=payload.user_query,
-                config=config,
-            )
-            reply = response.text if response.text else "Operation acknowledged. Ready for your dispatch or query."
-            return AgentQueryResponse(response=reply)
-        except Exception as e:
-            err_str = str(e)
-            logger.warning("Execution failed on %s: %s", model_name, err_str)
-            last_err = e
-            if any(code in err_str for code in ["503", "429", "404", "UNAVAILABLE"]):
-                continue
-            else:
-                raise HTTPException(status_code=500, detail=err_str)
-
-    raise HTTPException(status_code=503, detail=f"Agent models unavailable: {str(last_err)}")
+    except Exception as e:
+        logger.exception("Agent execution failed: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
