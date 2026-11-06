@@ -42,7 +42,7 @@ except Exception as e:
 
 # --- 2. EXECUTABLE TOOLS ---
 
-def get_active_fleet_telemetry(only_breaches: bool = False) -> str:
+def get_active_fleet_telemetry(only_breaches: bool = False, **kwargs) -> str:
     """Fetches live telemetry for active shipments from Supabase."""
     if not supabase:
         return json.dumps({"error": "Supabase client is not connected."})
@@ -60,7 +60,14 @@ def get_active_fleet_telemetry(only_breaches: bool = False) -> str:
         return json.dumps({"error": f"Database query failed: {str(e)}"})
 
 
-def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: bool, transit_time_hours: float, distance_km: float = 600.0) -> str:
+def predict_temperature_breach_risk(
+    origin: str = "Johannesburg", 
+    destination: str = "Cape Town", 
+    is_delayed: bool = False, 
+    transit_time_hours: float = 24.0, 
+    distance_km: float = 600.0,
+    **kwargs
+) -> str:
     """Runs the containerized Random Forest model to predict continuous probability of a temperature breach (>8°C)."""
     if rf_model is None or route_encoder is None:
         return json.dumps({"error": "ML models not available in backend container."})
@@ -95,7 +102,7 @@ def predict_temperature_breach_risk(origin: str, destination: str, is_delayed: b
     })
 
 
-def get_corridor_live_weather(location_name: str) -> str:
+def get_corridor_live_weather(location_name: str = "Beaufort West", **kwargs) -> str:
     """Fetches real-time ambient weather from Open-Meteo."""
     COORDINATES = {
         "johannesburg": (-26.2041, 28.0473),
@@ -104,9 +111,21 @@ def get_corridor_live_weather(location_name: str) -> str:
         "beaufort west": (-32.3567, 22.5830),
         "bloemfontein": (-29.0852, 26.1596),
         "harrismith": (-28.2728, 29.1297),
+        "polokwane": (-23.9045, 29.4688),
+        "port elizabeth": (-33.9608, 25.6022),
+        "george": (-33.9630, 22.4617),
+        "mossel bay": (-34.1831, 22.1460),
+        "knysna": (-34.0363, 23.0471)
     }
-    lat, lon = COORDINATES.get(location_name.strip().lower(), (-26.2041, 28.0473))
+    
+    # Handle hallucinated arguments like lists of cities
+    if "cities" in kwargs and isinstance(kwargs["cities"], list) and len(kwargs["cities"]) > 0:
+        location_name = kwargs["cities"][0]
+
+    loc_clean = str(location_name).strip().lower()
+    lat, lon = COORDINATES.get(loc_clean, (-32.3567, 22.5830))
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,surface_pressure"
+    
     try:
         r = requests.get(url, timeout=6)
         r.raise_for_status()
@@ -122,7 +141,7 @@ def get_corridor_live_weather(location_name: str) -> str:
         return json.dumps({"error": f"Weather fetch failed: {str(e)}"})
 
 
-def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, total_tkm: float = 600000.0) -> str:
+def simulate_modal_shift_economics(corridor_key: str = "Natcor", shift_percentage: float = 30.0, total_tkm: float = 600000.0, **kwargs) -> str:
     """Calculates carbon reductions and South African Carbon Tax savings (R28.00/tonne)."""
     road_emission_factor = 73.2
     rail_emission_factor = 12.2
@@ -146,11 +165,17 @@ def simulate_modal_shift_economics(corridor_key: str, shift_percentage: float, t
     })
 
 
+# Map both canonical names and common hallucinated model aliases
 AVAILABLE_TOOLS = {
     "get_active_fleet_telemetry": get_active_fleet_telemetry,
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
     "get_corridor_live_weather": get_corridor_live_weather,
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
+    # Aliases
+    "weather_monitoring": get_corridor_live_weather,
+    "get_weather": get_corridor_live_weather,
+    "predict_risk": predict_temperature_breach_risk,
+    "fleet_telemetry": get_active_fleet_telemetry
 }
 
 GROQ_TOOLS = [
@@ -221,11 +246,20 @@ GROQ_TOOLS = [
     }
 ]
 
-SYSTEM_PROMPT = """You are the AI Control Tower Copilot for a South African Cold Chain Logistics Network.
+SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
 You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, and carbon calculations.
 
-For general greetings or conversational prompts (e.g., 'hi', 'who are you', 'help'), reply directly and politely without calling any tools.
-Use tools only when specific operational metrics, telemetry, risk scenarios, weather, or carbon shifts are requested.
+AUTONOMOUS DECISION RULES:
+1. NEVER STALL OR LOOP INTO ASKING FOR CLARIFICATION:
+   - When asked for "best performer", "poorest", "worst performer", "summary", "today's summary", "overall", or "you pick":
+     DO NOT ask the user to specify metrics. IMMEDIATELY call `get_active_fleet_telemetry`.
+2. OPERATIONAL BENCHMARKS:
+   - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
+   - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
+   - "Summary / Overall" = Call `get_active_fleet_telemetry`, compute active fleet count, delayed vs in-transit count, and list temperature breaches.
+3. TOOL-CALLING INTEGRITY:
+   - Only call defined tools: `get_active_fleet_telemetry`, `predict_temperature_breach_risk`, `get_corridor_live_weather`, `simulate_modal_shift_economics`.
+   - For waypoint weather, provide a single city string (e.g., "Beaufort West", "Johannesburg", "Durban").
 """
 
 
@@ -264,11 +298,18 @@ async def query_agent(payload: AgentQueryRequest):
 
         # Handle tool calling
         if response_msg.tool_calls:
-            messages.append(response_msg)
+            # Append model's assistant turn with tool calls
+            messages.append(response_msg.model_dump())
 
             for tool_call in response_msg.tool_calls:
                 func_name = tool_call.function.name
-                func_args = json.loads(tool_call.function.arguments or "{}")
+                
+                # Safe JSON arguments parsing
+                try:
+                    func_args = json.loads(tool_call.function.arguments or "{}")
+                except Exception:
+                    func_args = {}
+
                 tool_func = AVAILABLE_TOOLS.get(func_name)
 
                 if tool_func:
@@ -278,15 +319,19 @@ async def query_agent(payload: AgentQueryRequest):
                     except Exception as err:
                         tool_output = json.dumps({"error": f"Tool execution error: {str(err)}"})
                 else:
-                    tool_output = json.dumps({"error": f"Function {func_name} not found"})
+                    logger.warning("Unknown tool attempted: %s", func_name)
+                    tool_output = json.dumps({
+                        "error": f"Function '{func_name}' is not recognized. Valid tools: {list(AVAILABLE_TOOLS.keys())}"
+                    })
 
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "name": func_name,
-                    "content": tool_output
+                    "content": str(tool_output)
                 })
 
+            # Secondary synthesis call: Omit tools and tool_choice to prevent 400 invalid_request_error
             final_res = await groq_client.chat.completions.create(
                 model=ACTIVE_MODEL,
                 messages=messages,
