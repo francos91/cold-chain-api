@@ -18,8 +18,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
 
-# Ultra-fast, high-allowance model (500,000 Tokens/Day on Groq Free Tier)
-ACTIVE_MODEL = "llama-3.1-8b-instant"
+# Official active fast production model on Groq
+ACTIVE_MODEL = "openai/gpt-oss-20b"
 
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY is not set in environment.")
@@ -57,7 +57,7 @@ def get_active_fleet_telemetry(only_breaches: bool = False, **kwargs) -> str:
         if only_breaches:
             query = query.gt("temperature_celsius", 8.0)
         
-        # Order descending by temperature; limit to 15 records to preserve token budget
+        # Order descending by temperature so worst performers appear first; limit 15 to stay within token budgets
         res = query.order("temperature_celsius", desc=True).limit(15).execute()
         return json.dumps(res.data or [])
     except Exception as e:
@@ -168,7 +168,7 @@ def simulate_modal_shift_economics(corridor_key: str = "Natcor", shift_percentag
     })
 
 
-# Alias mapping for fuzzy intent
+# Map both canonical names and common hallucinated model aliases
 AVAILABLE_TOOLS = {
     "get_active_fleet_telemetry": get_active_fleet_telemetry,
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
@@ -263,7 +263,7 @@ AUTONOMOUS DECISION RULES:
 3. OPERATIONAL PERFORMANCE BENCHMARKS:
    - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
    - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
-   - "Summary / Overall" = Call `get_active_fleet_telemetry`, report active fleet count, delayed vs in-transit count, and active excursions (>8.0°C).
+   - "Summary / Overall" = Call `get_active_fleet_telemetry`, report active fleet count, delayed vs in-transit count, and detail any active excursions (>8.0°C).
 4. CURRENCY & UNIT FIDELITY:
    - Always report monetary values in exact South African Rand (ZAR / R).
    - Never round single Rand values into thousands ('k') unless the value explicitly exceeds R1,000.
