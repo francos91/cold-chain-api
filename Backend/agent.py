@@ -309,6 +309,13 @@ OPERATIONAL COST-TO-SERVE BENCHMARK:
   2. Average Cost per Shipment.
   3. The Top 3 Highest-Cost Shipments (with Origin -> Destination, Distance, and ZAR Cost).
 
+RISK CLASSIFICATION BENCHMARK:
+- When summarizing output from `predict_temperature_breach_risk`, NEVER contradict the returned `risk_classification`:
+  * Breach Probability > 40%: Must strictly be reported as "CRITICAL RISK".
+  * Breach Probability 15% - 40%: Must strictly be reported as "MODERATE RISK".
+  * Breach Probability < 15%: Must strictly be reported as "LOW RISK".
+- If the tool outputs a probability of 67%, declare it as "CRITICAL RISK" and advise on immediate refrigeration or routing interventions.
+
 OPERATIONAL BENCHMARKS:
 - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
 - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
