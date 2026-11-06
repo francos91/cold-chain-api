@@ -88,6 +88,27 @@ def predict_temperature_breach_risk(
   except Exception:
     route_enc = 0
 
+  # Standard freight corridor distances to prevent arbitrary 600km fallbacks
+  KNOWN_CORRIDOR_DISTANCES = {
+      "polokwane_to_knysna": 1605.7,
+      "knysna_to_polokwane": 1605.7,
+      "johannesburg_to_durban": 570.0,
+      "durban_to_johannesburg": 570.0,
+      "stellenbosch_to_polokwane": 1894.7,
+      "polokwane_to_stellenbosch": 1894.7,
+      "george_to_polokwane": 1633.0,
+      "polokwane_to_george": 1633.0,
+      "johannesburg_to_cape town": 1398.0,
+      "cape town_to_johannesburg": 1398.0,
+      "cape town_to_durban": 1635.0,
+      "durban_to_cape town": 1635.0,
+  }
+
+  route_lookup_key = route_key.strip().lower()
+  effective_distance = float(distance_km)
+  if effective_distance == 600.0 and route_lookup_key in KNOWN_CORRIDOR_DISTANCES:
+    effective_distance = KNOWN_CORRIDOR_DISTANCES[route_lookup_key]
+
   route_risk_proxy = 0.22 if is_delayed else 0.08
   delayed_flag = 1 if is_delayed else 0
 
@@ -95,7 +116,7 @@ def predict_temperature_breach_risk(
       "route_enc": route_enc,
       "route_risk_score": route_risk_proxy,
       "is_delayed": delayed_flag,
-      "distance_km": float(distance_km),
+      "distance_km": effective_distance,
       "transit_time_hours": float(transit_time_hours),
   }])
 
@@ -116,7 +137,7 @@ def predict_temperature_breach_risk(
       "parameters": {
           "is_delayed": is_delayed,
           "transit_time_hours": transit_time_hours,
-          "distance_km": distance_km,
+          "distance_km": effective_distance,
       },
   })
 
@@ -313,11 +334,11 @@ OPERATIONAL COST-TO-SERVE BENCHMARK:
   3. The Top 3 Highest-Cost Shipments (with Origin -> Destination, Distance, and ZAR Cost).
 
 RISK CLASSIFICATION BENCHMARK:
-- When summarizing output from `predict_temperature_breach_risk`, NEVER contradict the returned `risk_classification`:
-  * Breach Probability >= 40%: Must strictly be reported as "CRITICAL RISK".
-  * Breach Probability 15% - 39.99%: Must strictly be reported as "MODERATE RISK".
-  * Breach Probability < 15%: Must strictly be reported as "LOW RISK".
-- If the tool outputs a probability of 33%, declare it strictly as "MODERATE RISK" and advise on temperature monitoring and backup refrigeration units.
+- When summarizing output from `predict_temperature_breach_risk`, ALWAYS reflect the exact `risk_classification` and `breach_probability_pct` returned:
+  * Breach Probability >= 40.0%: Strictly report as "CRITICAL RISK" (e.g., 40% - 100% MUST be declared CRITICAL RISK with immediate interventions required).
+  * Breach Probability 15.0% - 39.99%: Strictly report as "MODERATE RISK".
+  * Breach Probability < 15.0%: Strictly report as "LOW RISK".
+- NEVER state that a probability at or above 40% is "LOW RISK".
 
 OPERATIONAL BENCHMARKS:
 - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
