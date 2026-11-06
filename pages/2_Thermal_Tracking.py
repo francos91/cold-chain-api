@@ -17,7 +17,20 @@ def get_base_shipments():
     try:
         res = requests.get(API_DASHBOARD)
         res.raise_for_status()
-        return pd.DataFrame(res.json()["raw"])
+        raw_df = pd.DataFrame(res.json()["raw"])
+        if "status" in raw_df.columns:
+            raw_df["status"] = (
+                raw_df["status"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .replace({
+                    "in transit": "in-transit",
+                    "intransit": "in-transit",
+                    "in_transit": "in-transit"
+                })
+            )
+        return raw_df
     except:
         return pd.DataFrame()
 
@@ -39,7 +52,12 @@ if df.empty:
 
 # Sidebar for selection
 st.sidebar.header("Filter Shipments")
-selected_status = st.sidebar.selectbox("Select Status", options=df["status"].unique())
+if st.sidebar.button("Refresh Telemetry"):
+    st.cache_data.clear()
+    st.rerun()
+
+status_options = sorted(list(df["status"].dropna().unique()))
+selected_status = st.sidebar.selectbox("Select Status", options=status_options)
 
 filtered_df = df[df["status"] == selected_status]
 
@@ -123,12 +141,10 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 )
 
                 avg_curve = status_time_agg.values
-                # Standard reefer thermostat operating tolerance (+/- 1.5°C), clamped at 0°C minimum
                 upper_bound = avg_curve + 1.5
                 lower_bound = np.maximum(avg_curve - 1.5, 0.0)
                 time_points = ts_selected["time_minutes"].values
 
-                # Average baseline line
                 fig.add_trace(go.Scatter(
                     x=time_points,
                     y=avg_curve,
@@ -137,7 +153,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                     line=dict(color="#ff7f0e", width=2, dash="dash")
                 ))
 
-                # Safe Operating Tolerance Band (Filled corridor)
                 fig.add_trace(go.Scatter(
                     x=time_points.tolist() + time_points.tolist()[::-1],
                     y=upper_bound.tolist() + lower_bound.tolist()[::-1],
@@ -149,7 +164,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                     showlegend=True
                 ))
 
-            # Breach threshold line
             fig.add_hline(
                 y=8.0,
                 line_dash="dash",
@@ -184,7 +198,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 height=450
             )
 
-            # Start marker (Green)
             fig_map.add_scattermap(
                 lat=[start_point["latitude"]],
                 lon=[start_point["longitude"]],
@@ -195,7 +208,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
                 name="Start"
             )
 
-            # End marker (Red)
             fig_map.add_scattermap(
                 lat=[end_point["latitude"]],
                 lon=[end_point["longitude"]],
@@ -213,7 +225,6 @@ if st.button("Load Thermal Telemetry & GPS Map") or st.session_state.thermal_loa
             fig_map.update_traces(marker=dict(size=8))
             st.plotly_chart(fig_map, width="stretch")
 
-            # Breach notice
             breach_df = ts_selected[ts_selected["temperature"] > 8.0]
             if len(breach_df) > 0:
                 first_breach = breach_df.iloc[0]
