@@ -99,17 +99,20 @@ def predict_temperature_breach_risk(
       "transit_time_hours": float(transit_time_hours),
   }])
 
-  prob = float(rf_model.predict_proba(features)[0, 1])
+  prob_raw = float(rf_model.predict_proba(features)[0, 1])
+  prob_pct = round(prob_raw * 100, 2)
+
+  if prob_pct >= 40.0:
+    classification = "CRITICAL RISK"
+  elif prob_pct >= 15.0:
+    classification = "MODERATE RISK"
+  else:
+    classification = "LOW RISK"
+
   return json.dumps({
       "route": route_key,
-      "breach_probability_pct": round(prob * 100, 2),
-      "risk_classification": (
-          "CRITICAL RISK"
-          if prob > 0.40
-          else "MODERATE RISK"
-          if prob > 0.15
-          else "LOW RISK"
-      ),
+      "breach_probability_pct": prob_pct,
+      "risk_classification": classification,
       "parameters": {
           "is_delayed": is_delayed,
           "transit_time_hours": transit_time_hours,
@@ -311,10 +314,10 @@ OPERATIONAL COST-TO-SERVE BENCHMARK:
 
 RISK CLASSIFICATION BENCHMARK:
 - When summarizing output from `predict_temperature_breach_risk`, NEVER contradict the returned `risk_classification`:
-  * Breach Probability > 40%: Must strictly be reported as "CRITICAL RISK".
-  * Breach Probability 15% - 40%: Must strictly be reported as "MODERATE RISK".
+  * Breach Probability >= 40%: Must strictly be reported as "CRITICAL RISK".
+  * Breach Probability 15% - 39.99%: Must strictly be reported as "MODERATE RISK".
   * Breach Probability < 15%: Must strictly be reported as "LOW RISK".
-- If the tool outputs a probability of 67%, declare it as "CRITICAL RISK" and advise on immediate refrigeration or routing interventions.
+- If the tool outputs a probability of 33%, declare it strictly as "MODERATE RISK" and advise on temperature monitoring and backup refrigeration units.
 
 OPERATIONAL BENCHMARKS:
 - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
