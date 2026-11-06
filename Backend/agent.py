@@ -46,26 +46,93 @@ except Exception as e:
 # --- 2. EXECUTABLE TOOLS ---
 
 
-def get_active_fleet_telemetry(only_breaches: bool = False, **kwargs) -> str:
-  """Fetches live telemetry for active shipments from Supabase."""
+def get_active_fleet_telemetry(
+    status_filter: str = "active",
+    only_breaches: bool = False,
+    **kwargs,
+) -> str:
+  """Fetches live telemetry for shipments from Supabase filtered by status and breaches."""
   if not supabase:
     return json.dumps({"error": "Supabase client is not connected."})
   try:
-    query = (
-        supabase.table("cold_chain_tracking")
-        .select(
-            "shipment_id,origin,destination,temperature_celsius,status,distance_km,transit_time_hours,weight_tonnes"
-        )
-        .not_.eq("status", "delivered")
+    query = supabase.table("cold_chain_tracking").select(
+        "shipment_id,origin,destination,temperature_celsius,status,distance_km,transit_time_hours,weight_tonnes"
     )
+
+    clean_status = str(status_filter).strip().lower()
+    if clean_status == "delivered":
+      query = query.eq("status", "delivered")
+    elif clean_status == "delayed":
+      query = query.eq("status", "delayed")
+    elif clean_status == "in-transit" or clean_status == "in_transit":
+      query = query.eq("status", "in-transit")
+    elif clean_status == "active":
+      query = query.not_.eq("status", "delivered")
+    # if 'all', do not filter on status
+
     if only_breaches:
       query = query.gt("temperature_celsius", 8.0)
 
-    # Capped at 15 to stay strictly within token budgets and avoid read timeouts
-    res = query.order("temperature_celsius", desc=True).limit(15).execute()
+    res = query.order("temperature_celsius", desc=True).limit(25).execute()
     return json.dumps(res.data or [])
   except Exception as e:
     return json.dumps({"error": f"Database query failed: {str(e)}"})
+
+
+def get_fleet_aggregate_summary(**kwargs) -> str:
+  """Calculates global fleet metrics across the entire master database.
+
+  Use for totals, status distributions, and top volume hubs.
+  """
+  if not supabase:
+    return json.dumps({"error": "Supabase client is not connected."})
+  try:
+    # Fetch all records across master database for accurate grouping
+    res = (
+        supabase.table("cold_chain_tracking")
+        .select("shipment_id,origin,destination,status,temperature_celsius")
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+      return json.dumps({"error": "No records found in database."})
+
+    df = pd.DataFrame(rows)
+    total_records = len(df)
+    status_counts = df["status"].value_counts().to_dict()
+
+    top_origins_all = df["origin"].value_counts().head(5).to_dict()
+    top_destinations_all = df["destination"].value_counts().head(5).to_dict()
+
+    # Breakdown specifically for delivered shipments
+    df_delivered = df[df["status"] == "delivered"]
+    top_delivered_destinations = (
+        df_delivered["destination"].value_counts().head(5).to_dict()
+        if not df_delivered.empty
+        else {}
+    )
+    top_delivered_origins = (
+        df_delivered["origin"].value_counts().head(5).to_dict()
+        if not df_delivered.empty
+        else {}
+    )
+
+    # Active excursions count (>8°C on non-delivered)
+    df_active = df[df["status"] != "delivered"]
+    active_breaches = int((df_active["temperature_celsius"] > 8.0).sum())
+
+    return json.dumps({
+        "total_records_in_database": total_records,
+        "status_distribution": status_counts,
+        "active_fleet_count": len(df_active),
+        "active_temperature_excursions": active_breaches,
+        "top_overall_destinations": top_destinations_all,
+        "top_overall_origins": top_origins_all,
+        "top_delivered_destinations": top_delivered_destinations,
+        "top_delivered_origins": top_delivered_origins,
+    })
+  except Exception as e:
+    return json.dumps({"error": f"Fleet aggregation failed: {str(e)}"})
 
 
 def predict_temperature_breach_risk(
@@ -82,7 +149,6 @@ def predict_temperature_breach_risk(
         {"error": "ML models not available in backend container."}
     )
 
-  # Standard freight corridor distances to prevent arbitrary 600km fallbacks
   KNOWN_CORRIDOR_DISTANCES = {
       "polokwane_to_knysna": 1605.7,
       "knysna_to_polokwane": 1605.7,
@@ -103,7 +169,6 @@ def predict_temperature_breach_risk(
   route_key_normalized = f"{clean_origin}_to_{clean_destination}"
   route_key_title = f"{origin.strip().title().replace(' ', '_')}_to_{destination.strip().title().replace(' ', '_')}"
 
-  # Safe numeric conversion handling None or null
   try:
     effective_distance = (
         float(distance_km) if distance_km is not None else 600.0
@@ -116,7 +181,6 @@ def predict_temperature_breach_risk(
         route_key_normalized, 600.0
     )
 
-  # Try encoded matches across casing variations
   route_enc = None
   for candidate in [
       route_key_normalized,
@@ -136,7 +200,6 @@ def predict_temperature_breach_risk(
         else 5
     )
 
-  # Calibrate route risk dynamically based on delay state and transit duration
   base_risk = 0.50 if is_delayed else 0.10
   duration_penalty = min(0.35, (float(transit_time_hours) / 40.0) * 0.35)
   route_risk_proxy = round(min(0.95, base_risk + duration_penalty), 2)
@@ -150,13 +213,12 @@ def predict_temperature_breach_risk(
       "transit_time_hours": float(transit_time_hours),
   }])
 
-  # 1. Primary Model Inference
   try:
     prob_raw = float(rf_model.predict_proba(features)[0, 1])
   except Exception:
     prob_raw = 0.0
 
-  # 2. Physics-based heuristic floor to prevent silent ML model collapse on delayed long-hauls
+  # Physics-based heuristic floor
   if is_delayed and float(transit_time_hours) >= 30.0:
     prob_raw = max(prob_raw, 0.74)
   elif is_delayed and float(transit_time_hours) >= 18.0:
@@ -270,9 +332,11 @@ def simulate_modal_shift_economics(
 
 AVAILABLE_TOOLS = {
     "get_active_fleet_telemetry": get_active_fleet_telemetry,
+    "get_fleet_aggregate_summary": get_fleet_aggregate_summary,
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
     "get_corridor_live_weather": get_corridor_live_weather,
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
+    "fleet_aggregate": get_fleet_aggregate_summary,
     "weather_monitoring": get_corridor_live_weather,
     "get_weather": get_corridor_live_weather,
     "predict_risk": predict_temperature_breach_risk,
@@ -283,23 +347,53 @@ GROQ_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_fleet_aggregate_summary",
+            "description": (
+                "REQUIRED when asked for total fleet counts, total delivered"
+                " vs in-transit vs delayed records, top destinations, top"
+                " origin hubs, or fleet-wide volume statistics. Computes"
+                " aggregations across the entire 4,500-shipment master database."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_active_fleet_telemetry",
             "description": (
-                "REQUIRED for active fleet status, summaries, temperature"
-                " excursions, operational costs, financial exposure, or"
-                " cost-to-serve calculations. Fetches distances and"
-                " temperatures from Supabase."
+                "Fetches real-time shipment records from Supabase. Use for"
+                " live status, highest temperature excursions, individual route"
+                " costs, or checking specific shipments."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "status_filter": {
+                        "type": "string",
+                        "enum": [
+                            "active",
+                            "in-transit",
+                            "delayed",
+                            "delivered",
+                            "all",
+                        ],
+                        "description": (
+                            "Filter by status: 'active' (non-delivered),"
+                            " 'delivered', 'delayed', 'in-transit', or 'all'."
+                        ),
+                    },
                     "only_breaches": {
                         "type": "boolean",
                         "description": (
                             "Set to True to filter exclusively for shipments"
                             " above 8.0°C."
                         ),
-                    }
+                    },
                 },
                 "required": [],
             },
@@ -376,6 +470,12 @@ GROQ_TOOLS = [
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
 You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, and carbon calculations.
 
+DATABASE INTEGRITY & SNAPSHOT AWARENESS:
+- The master database contains approximately 4,500 total shipments across all statuses ('in-transit', 'delayed', and 'delivered').
+- NEVER claim that the dataset "only contains in-transit shipments" or that "delivered records do not exist."
+- When asked for overall counts, the most popular destinations/origins, delivered counts, or fleet status distributions, ALWAYS call `get_fleet_aggregate_summary`.
+- When using `get_active_fleet_telemetry`, recognize that it returns an active operational slice prioritized by thermal risk, NOT the entire historical database.
+
 OPERATIONAL COST-TO-SERVE BENCHMARK:
 - Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
 - When answering cost questions, ALWAYS calculate and present:
@@ -385,15 +485,9 @@ OPERATIONAL COST-TO-SERVE BENCHMARK:
 
 RISK CLASSIFICATION BENCHMARK:
 - When summarizing output from `predict_temperature_breach_risk`, ALWAYS reflect the exact `risk_classification` and `breach_probability_pct` returned:
-  * Breach Probability >= 40.0%: Strictly report as "CRITICAL RISK" (e.g., 40% - 100% MUST be declared CRITICAL RISK with immediate interventions required).
+  * Breach Probability >= 40.0%: Strictly report as "CRITICAL RISK".
   * Breach Probability 15.0% - 39.99%: Strictly report as "MODERATE RISK".
   * Breach Probability < 15.0%: Strictly report as "LOW RISK".
-- NEVER state that a probability at or above 40% is "LOW RISK".
-
-OPERATIONAL BENCHMARKS:
-- "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
-- "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
-- "Summary / Overall" = Report active fleet count, delayed vs in-transit count, and detail any active excursions (>8.0°C).
 
 CURRENCY & UNIT FIDELITY:
 - Always format currency as 'R' or 'ZAR' (e.g., R29,102.60).
@@ -425,11 +519,16 @@ async def query_agent(payload: AgentQueryRequest):
 
   user_text = payload.user_query.strip().lower()
 
-  # DETERMINISTIC INTENT DETECTION:
-  # If the user asks for costs, fleet summaries, or active loads, force get_active_fleet_telemetry
+  # DETERMINISTIC INTENT DETECTION
+  needs_aggregate = bool(
+      re.search(
+          r"\b(delivered|total|most|popular|highest count|breakdown|volume|distribution|destination|origins)\b",
+          user_text,
+      )
+  )
   needs_telemetry = bool(
       re.search(
-          r"\b(cost|costs|spend|financial|summary|fleet|active|operations|performer|pick)\b",
+          r"\b(cost|costs|spend|financial|fleet|active|operations|performer|pick|excursion)\b",
           user_text,
       )
   )
@@ -446,8 +545,13 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # Force telemetry tool calling on iteration 1 if the query matches operational intent
-      if iteration == 1 and needs_telemetry:
+      # Force appropriate tool on first turn if unambiguous intent detected
+      if iteration == 1 and needs_aggregate:
+        tool_choice_param = {
+            "type": "function",
+            "function": {"name": "get_fleet_aggregate_summary"},
+        }
+      elif iteration == 1 and needs_telemetry:
         tool_choice_param = {
             "type": "function",
             "function": {"name": "get_active_fleet_telemetry"},
@@ -471,7 +575,6 @@ async def query_agent(payload: AgentQueryRequest):
         if content and content.strip():
           return AgentQueryResponse(response=content)
 
-        # Deterministic Python fallback for cost calculations if LLM returned empty content
         if needs_telemetry:
           raw_data = json.loads(get_active_fleet_telemetry())
           if isinstance(raw_data, list) and len(raw_data) > 0:
@@ -505,12 +608,12 @@ async def query_agent(payload: AgentQueryRequest):
         return AgentQueryResponse(
             response=(
                 "I am monitoring your active cold-chain fleet. You can request"
-                " cost breakdowns, breach risk predictions, corridor weather,"
-                " or a fleet summary."
+                " fleet summaries, volume rankings, breach risk predictions,"
+                " corridor weather, or cost breakdowns."
             )
         )
 
-      # Build clean assistant payload dictionary (strips internal Groq annotations)
+      # Build clean assistant payload dictionary
       assistant_payload: Dict[str, Any] = {
           "role": "assistant",
           "tool_calls": [
@@ -530,7 +633,7 @@ async def query_agent(payload: AgentQueryRequest):
 
       messages.append(assistant_payload)
 
-      # Execute each tool call emitted in this turn
+      # Execute each tool call emitted
       for tool_call in response_msg.tool_calls:
         func_name = tool_call.function.name
 
