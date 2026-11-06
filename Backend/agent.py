@@ -174,7 +174,7 @@ class AgentQueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=AgentQueryResponse)
-def query_agent(payload: AgentQueryRequest):
+async def query_agent(payload: AgentQueryRequest):
     if not ai_client:
         raise HTTPException(
             status_code=503,
@@ -198,13 +198,13 @@ def query_agent(payload: AgentQueryRequest):
         temperature=0.1,
     )
 
-    candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash"]
+    candidate_models = ["gemini-2.0-flash", "gemini-3.8-flash"]
     last_err = None
 
     for model_name in candidate_models:
         try:
-            logger.info("Attempting agent execution with model: %s", model_name)
-            response = ai_client.models.generate_content(
+            logger.info("Executing async agent query with model: %s", model_name)
+            response = await ai_client.aio.models.generate_content(
                 model=model_name,
                 contents=payload.user_query,
                 config=config,
