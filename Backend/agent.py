@@ -55,8 +55,8 @@ def get_active_fleet_telemetry(only_breaches: bool = False, **kwargs) -> str:
         if only_breaches:
             query = query.gt("temperature_celsius", 8.0)
         
-        # Order by temperature descending so worst performers/breaches appear first
-        res = query.order("temperature_celsius", desc=True).limit(25).execute()
+        # Order by temperature descending so worst performers appear first; limit to 20 for fast network response
+        res = query.order("temperature_celsius", desc=True).limit(20).execute()
         return json.dumps(res.data or [])
     except Exception as e:
         return json.dumps({"error": f"Database query failed: {str(e)}"})
@@ -185,7 +185,7 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_active_fleet_telemetry",
-            "description": "Fetches live telemetry for active (non-delivered) shipments from Supabase, including distances, temperatures, and status.",
+            "description": "Fetches live telemetry for active shipments from Supabase. REQUIRED for: fleet summary, active loads, operational costs, financial exposure, cost breakdown, distance analysis, and excursion audits.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -253,13 +253,13 @@ You assist operations managers with real-time fleet telemetry, predictive risk a
 
 AUTONOMOUS DECISION RULES:
 1. NEVER STALL OR LOOP INTO ASKING FOR CLARIFICATION:
-   - When asked for "best performer", "poorest", "worst performer", "summary", "summary on shipments", "today's summary", "overall", "cost", "costs", "operational cost", "overall operational cost", or "you pick":
+   - When asked for "best performer", "poorest", "worst performer", "summary", "summary on shipments", "today's summary", "overall", "cost", "costs", "operational cost", "overall operational cost", "cost breakdown", or "you pick":
      DO NOT ask the user to specify metrics. IMMEDIATELY call `get_active_fleet_telemetry`.
 2. OPERATIONAL COST-TO-SERVE BENCHMARK:
-   - When asked for operational costs, financial exposure, fleet spend, or cost summary:
-     Call `get_active_fleet_telemetry`.
-     Compute trip cost for each shipment using: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
-     Sum and report total active fleet cost, average cost per shipment, and identify the highest cost corridor.
+   - When asked for operational costs, financial exposure, fleet spend, or cost breakdown:
+     Always call `get_active_fleet_telemetry`.
+     Use: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
+     Calculate and summarize: Total active fleet cost, average cost per load, and highlight the top 3 highest-cost shipments.
 3. OPERATIONAL PERFORMANCE BENCHMARKS:
    - "Poorest / Worst Performer" = Shipment with highest current temperature, breach status (>8.0°C), or status == 'delayed'.
    - "Best Performer" = Shipment that is 'in-transit', non-delayed, and closest to ideal cold chain target (0.5°C to 4.5°C).
@@ -269,7 +269,7 @@ AUTONOMOUS DECISION RULES:
    - Never round single Rand values into thousands ('k') unless the value explicitly exceeds R1,000.
    - Example: R256.20 must be written as R256.20, NOT R256k.
 5. RESILIENCE & FUZZY MATCHING:
-   - If a prompt contains typos, missing words, or garbled syntax, infer the operational intent (telemetry, weather, risk, cost, or carbon) and execute the appropriate tool or response directly.
+   - If a prompt contains typos, missing words, or garbled syntax (e.g. "Cost breakdown", "sumry cst"), infer the operational intent and execute the appropriate tool or response directly.
    - Never output empty text or refuse to assist.
 6. TOOL-CALLING INTEGRITY:
    - Only call defined tools: `get_active_fleet_telemetry`, `predict_temperature_breach_risk`, `get_corridor_live_weather`, `simulate_modal_shift_economics`.
@@ -312,7 +312,7 @@ async def query_agent(payload: AgentQueryRequest):
                 tools=GROQ_TOOLS,
                 tool_choice="auto",
                 temperature=0.1,
-                max_tokens=1000
+                max_tokens=900
             )
             response_msg = completion.choices[0].message
 
@@ -325,7 +325,7 @@ async def query_agent(payload: AgentQueryRequest):
                         model=ACTIVE_MODEL,
                         messages=messages,
                         temperature=0.2,
-                        max_tokens=800
+                        max_tokens=600
                     )
                     content = fallback_res.choices[0].message.content or (
                         "I am actively monitoring your South African cold-chain fleet. "
@@ -390,7 +390,7 @@ async def query_agent(payload: AgentQueryRequest):
             model=ACTIVE_MODEL,
             messages=messages,
             temperature=0.1,
-            max_tokens=1200
+            max_tokens=1000
         )
         return AgentQueryResponse(
             response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit."
