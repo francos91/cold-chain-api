@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY Backend/main.py .
+COPY Backend/agent.py .
 
 # Copy ML models from the dashboard folder where they actually live
 COPY dashboard/advanced_model.pkl .
