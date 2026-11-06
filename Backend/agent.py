@@ -287,40 +287,50 @@ async def query_agent(payload: AgentQueryRequest):
         {"role": "user", "content": payload.user_query}
     ]
 
-    try:
-        completion = await groq_client.chat.completions.create(
-            model=ACTIVE_MODEL,
-            messages=messages,
-            tools=GROQ_TOOLS,
-            tool_choice="auto",
-            temperature=0.1,
-            max_tokens=1000
-        )
-        response_msg = completion.choices[0].message
+    max_tool_iterations = 3
+    iteration = 0
 
-        # Handle tool calling
-        if response_msg.tool_calls:
-            # Build clean assistant dictionary with only valid spec keys
-            # (Strictly omits None/empty content and SDK internal metadata like 'annotations')
+    try:
+        while iteration < max_tool_iterations:
+            iteration += 1
+
+            completion = await groq_client.chat.completions.create(
+                model=ACTIVE_MODEL,
+                messages=messages,
+                tools=GROQ_TOOLS,
+                tool_choice="auto",
+                temperature=0.1,
+                max_tokens=1000
+            )
+            response_msg = completion.choices[0].message
+
+            # If no tools called, we have our final synthesized text
+            if not response_msg.tool_calls:
+                return AgentQueryResponse(response=response_msg.content or "Fleet telemetry and analytics ready.")
+
+            # Append sanitized assistant message dictionary
+            clean_tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in response_msg.tool_calls
+            ]
+
             assistant_payload: Dict[str, Any] = {
                 "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in response_msg.tool_calls
-                ]
+                "tool_calls": clean_tool_calls,
             }
             if response_msg.content:
                 assistant_payload["content"] = response_msg.content
 
             messages.append(assistant_payload)
 
+            # Execute every tool call emitted in this turn
             for tool_call in response_msg.tool_calls:
                 func_name = tool_call.function.name
                 
@@ -333,7 +343,7 @@ async def query_agent(payload: AgentQueryRequest):
                 tool_func = AVAILABLE_TOOLS.get(func_name)
 
                 if tool_func:
-                    logger.info("Executing tool: %s with args: %s", func_name, func_args)
+                    logger.info("Iteration %d | Executing tool: %s with args: %s", iteration, func_name, func_args)
                     try:
                         tool_output = tool_func(**func_args)
                     except Exception as err:
@@ -351,21 +361,14 @@ async def query_agent(payload: AgentQueryRequest):
                     "content": str(tool_output)
                 })
 
-            # Secondary synthesis call: Omit tools and tool_choice to prevent 400 invalid_request_error
-            final_res = await groq_client.chat.completions.create(
-                model=ACTIVE_MODEL,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=1200
-            )
-            
-            final_content = final_res.choices[0].message.content
-            if not final_content:
-                final_content = "Active fleet telemetry retrieved successfully, but no analytical commentary was returned. Please re-issue your prompt."
-
-            return AgentQueryResponse(response=final_content)
-
-        return AgentQueryResponse(response=response_msg.content or "Ready for your operations query.")
+        # Final synthesis call if loop reaches max_tool_iterations
+        final_res = await groq_client.chat.completions.create(
+            model=ACTIVE_MODEL,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=1200
+        )
+        return AgentQueryResponse(response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit.")
 
     except Exception as e:
         logger.exception("Agent execution failed: %s", str(e))
