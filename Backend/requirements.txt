@@ -1,10 +1,10 @@
 fastapi
 uvicorn
 supabase
-pydantic
 pandas
 numpy
 scikit-learn
 joblib
 requests
-google-genai
+pydantic
+groq
