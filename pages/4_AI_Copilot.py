@@ -5,7 +5,7 @@ st.set_page_config(page_title="AI Operations Copilot", layout="wide", page_icon=
 
 st.title("🤖 Autonomous Cold Chain Operations Copilot")
 st.markdown(
-    "Powered by **Gemini 2.5 Flash** with native tool-calling into our "
+    "Powered by **Gemini 3.8 Flash** with native tool-calling into our "
     "**Random Forest Inference Engine**, **Live Open-Meteo Weather**, and **Supabase Relational Telemetry**."
 )
 
@@ -51,7 +51,7 @@ def submit_query(prompt_text: str):
         with st.spinner("🤖 Autonomous Agent invoking internal tools..."):
             try:
                 payload = {"user_query": prompt_text}
-                res = requests.post(API_AGENT_URL, json=payload, timeout=30)
+                res = requests.post(API_AGENT_URL, json=payload, timeout=90)
                 if res.status_code == 200:
                     ans = res.json().get("response", "No response received.")
                 else:
