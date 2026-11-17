@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from groq import AsyncGroq
@@ -393,12 +395,101 @@ def simulate_modal_shift_economics(
   })
 
 
+# --- SECURITY & HITL VETO GUARDRAIL TOOLS ---
+
+_INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?previous\s+instructions",
+    r"system\s+prompt",
+    r"bypass\s+guardrail",
+    r"drop\s+table",
+    r"delete\s+from",
+]
+
+
+def sanitize_operator_input(text: str) -> str:
+  """Deterministic input firewall blocking prompt-injection and SQL payloads."""
+  cleaned = str(text or "").strip()[:1000]
+  for pat in _INJECTION_PATTERNS:
+    if re.search(pat, cleaned, flags=re.IGNORECASE):
+      raise HTTPException(
+          status_code=400,
+          detail="Security Guardrail: Blocked unsafe instruction pattern.",
+      )
+  return cleaned
+
+
+def propose_autonomous_intervention(
+    shipment_id: str = "ZA-UNASSIGNED",
+    corridor: str = "N1 Corridor",
+    proposed_action: str = "Divert to nearest cold-storage cross-dock",
+    risk_score: float = 75.0,
+    **kwargs,
+) -> str:
+  """Stages a high-risk operational intervention in Supabase with a 60-second HITL veto window."""
+  if not supabase:
+    return json.dumps({"error": "Supabase client is not connected."})
+  try:
+    clean_id = (
+        re.sub(r"[^A-Za-z0-9\-_]", "", str(shipment_id))[:32] or "ZA-UNKNOWN"
+    )
+    now_utc = datetime.now(timezone.utc)
+    expires_utc = now_utc + timedelta(seconds=60)
+
+    record = {
+        "shipment_id": clean_id,
+        "corridor": str(corridor)[:120],
+        "proposed_action": str(proposed_action)[:300],
+        "risk_score": round(float(risk_score), 2),
+        "status": "pending",
+        "created_at": now_utc.isoformat(),
+        "expires_at": expires_utc.isoformat(),
+    }
+    res = supabase.table("pending_agent_actions").insert(record).execute()
+    inserted = (res.data or [record])[0]
+    return json.dumps({
+        "guardrail_status": "STAGED_FOR_HUMAN_VETO",
+        "action_id": inserted.get("id", "pending-id"),
+        "shipment_id": clean_id,
+        "proposed_action": record["proposed_action"],
+        "veto_window_seconds": 60,
+        "expires_at": expires_utc.isoformat(),
+    })
+  except Exception as e:
+    return json.dumps({"error": f"Failed to stage intervention: {str(e)}"})
+
+
+def veto_pending_action(action_id: str = "", **kwargs) -> str:
+  """Immediately cancels a pending autonomous intervention by ID."""
+  if not supabase:
+    return json.dumps({"error": "Supabase client is not connected."})
+  try:
+    clean_uuid = re.sub(r"[^a-fA-F0-9\-]", "", str(action_id))[:36]
+    if not clean_uuid:
+      return json.dumps({"error": "Valid action_id UUID is required to veto."})
+    res = (
+        supabase.table("pending_agent_actions")
+        .update({"status": "vetoed"})
+        .eq("id", clean_uuid)
+        .eq("status", "pending")
+        .execute()
+    )
+    if res.data:
+      return json.dumps({"status": "VETOED", "action_id": clean_uuid})
+    return json.dumps(
+        {"status": "NO_ACTIVE_ACTION_FOUND", "action_id": clean_uuid}
+    )
+  except Exception as e:
+    return json.dumps({"error": f"Veto failed: {str(e)}"})
+
+
 AVAILABLE_TOOLS = {
     "get_active_fleet_telemetry": get_active_fleet_telemetry,
     "get_fleet_aggregate_summary": get_fleet_aggregate_summary,
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
     "get_corridor_live_weather": get_corridor_live_weather,
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
+    "propose_autonomous_intervention": propose_autonomous_intervention,
+    "veto_pending_action": veto_pending_action,
     "fleet_aggregate": get_fleet_aggregate_summary,
     "weather_monitoring": get_corridor_live_weather,
     "get_weather": get_corridor_live_weather,
@@ -538,6 +629,33 @@ GROQ_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_autonomous_intervention",
+            "description": (
+                "REQUIRED whenever a shipment has a temperature breach (>8.0°C)"
+                " or CRITICAL breach risk (>=40%). Stages a 60-second"
+                " Human-in-the-Loop (HITL) intervention card in the Control"
+                " Tower so the operator can veto before execution."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shipment_id": {"type": "string"},
+                    "corridor": {"type": "string"},
+                    "proposed_action": {"type": "string"},
+                    "risk_score": {"type": "number"},
+                },
+                "required": [
+                    "shipment_id",
+                    "corridor",
+                    "proposed_action",
+                    "risk_score",
+                ],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
@@ -569,6 +687,9 @@ RISK CLASSIFICATION BENCHMARK:
   * Breach Probability >= 40.0%: Strictly report as "CRITICAL RISK".
   * Breach Probability 15.0% - 39.99%: Strictly report as "MODERATE RISK".
   * Breach Probability < 15.0%: Strictly report as "LOW RISK".
+
+HUMAN-IN-THE-LOOP (HITL) INTERVENTION GUARDRAIL:
+- Whenever an active shipment exceeds 8.0°C OR `predict_temperature_breach_risk` returns CRITICAL RISK (>= 40.0%), ALWAYS call `propose_autonomous_intervention` to stage a 60-second operator veto window before recommending dispatch changes.
 
 CURRENCY & UNIT FIDELITY:
 - Always format currency as 'R' or 'ZAR' (e.g., R29,102.60).
@@ -608,21 +729,35 @@ async def query_agent(payload: AgentQueryRequest):
   # 1. DYNAMIC PERSONA INJECTION
   role_instructions = ""
   if payload.user_role == "Executive":
-      role_instructions = "\nUSER ROLE: Executive. Keep answers brief, focus on total ZAR impact, OTIF, and high-level summaries. Do not list granular shipment IDs unless asked."
+    role_instructions = (
+        "\nUSER ROLE: Executive. Keep answers brief, focus on total ZAR"
+        " impact, OTIF, and high-level summaries. Do not list granular shipment"
+        " IDs unless asked."
+    )
   elif payload.user_role == "Dispatcher":
-      role_instructions = "\nUSER ROLE: Floor Dispatcher. Focus on specific shipment IDs, route names, thermal excursions, and immediate safety interventions."
-      
+    role_instructions = (
+        "\nUSER ROLE: Floor Dispatcher. Focus on specific shipment IDs, route"
+        " names, thermal excursions, and immediate safety interventions."
+    )
+
   dynamic_system_prompt = SYSTEM_PROMPT + role_instructions
 
   # 2. INITIALIZE MESSAGES
-  messages: List[Dict[str, Any]] = [{"role": "system", "content": dynamic_system_prompt}]
+  messages: List[Dict[str, Any]] = [
+      {"role": "system", "content": dynamic_system_prompt}
+  ]
 
   if payload.chat_history:
     for msg in payload.chat_history[-6:]:
-      if msg.role in ("user", "assistant") and msg.content and msg.content.strip():
+      if (
+          msg.role in ("user", "assistant")
+          and msg.content
+          and msg.content.strip()
+      ):
         messages.append({"role": msg.role, "content": msg.content.strip()})
 
-  messages.append({"role": "user", "content": payload.user_query})
+  clean_query = sanitize_operator_input(payload.user_query)
+  messages.append({"role": "user", "content": clean_query})
 
   max_tool_iterations = 3
   iteration = 0
@@ -631,7 +766,7 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # 3. FULL AUTONOMY: We removed the regex. The 70B model decides exactly what tool it needs based on the query.
+      # 3. FULL AUTONOMY: The model decides exactly what tool it needs based on the query.
       completion = await groq_client.chat.completions.create(
           model=ACTIVE_MODEL,
           messages=messages,
@@ -647,9 +782,12 @@ async def query_agent(payload: AgentQueryRequest):
         content = response_msg.content
         if content and content.strip():
           return AgentQueryResponse(response=content)
-        
+
         return AgentQueryResponse(
-            response="I am monitoring your active cold-chain fleet. You can request corridor weather, volume rankings, or cost breakdowns."
+            response=(
+                "I am monitoring your active cold-chain fleet. You can request"
+                " corridor weather, volume rankings, or cost breakdowns."
+            )
         )
 
       # Build clean assistant payload dictionary for tool execution
@@ -687,9 +825,13 @@ async def query_agent(payload: AgentQueryRequest):
           try:
             tool_output = tool_func(**func_args)
           except Exception as err:
-            tool_output = json.dumps({"error": f"Tool execution error: {str(err)}"})
+            tool_output = json.dumps(
+                {"error": f"Tool execution error: {str(err)}"}
+            )
         else:
-          tool_output = json.dumps({"error": f"Function '{func_name}' is not recognized."})
+          tool_output = json.dumps(
+              {"error": f"Function '{func_name}' is not recognized."}
+          )
 
         messages.append({
             "role": "tool",
@@ -703,9 +845,47 @@ async def query_agent(payload: AgentQueryRequest):
         model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
     )
     return AgentQueryResponse(
-        response=final_res.choices[0].message.content or "Completed multi-step fleet telemetry audit."
+        response=(
+            final_res.choices[0].message.content
+            or "Completed multi-step fleet telemetry audit."
+        )
     )
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.exception("Agent execution failed: %s", str(e))
     raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/actions/pending")
+async def list_pending_actions():
+  if not supabase:
+    return {"actions": []}
+  try:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # Auto-transition expired pending actions to 'executed'
+    supabase.table("pending_agent_actions").update({"status": "executed"}).eq(
+        "status", "pending"
+    ).lt("expires_at", now_iso).execute()
+
+    res = (
+        supabase.table("pending_agent_actions")
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+    return {"actions": res.data or []}
+  except Exception as e:
+    logger.warning("Pending actions check failed: %s", e)
+    return {"actions": []}
+
+
+@router.post("/actions/{action_id}/veto")
+async def veto_action_endpoint(action_id: str):
+  result = json.loads(veto_pending_action(action_id=action_id))
+  if "error" in result:
+    raise HTTPException(status_code=400, detail=result["error"])
+  return result
