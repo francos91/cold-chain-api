@@ -1,0 +1,51 @@
+name: Keep Streamlit Dashboards Awake
+
+on:
+  schedule:
+    # Runs every 8 hours (00:00, 08:00, 16:00 UTC) so apps never hit Streamlit's 12h sleep limit
+    - cron: '0 */8 * * *'
+  workflow_dispatch: # Allows manual trigger anytime from your phone
+
+jobs:
+  wake-dashboards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Playwright & Chromium
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Ping & Wake V1 and V2 Streamlit Dashboards
+        run: |
+          python - << 'EOF'
+          from playwright.sync_api import sync_playwright
+
+          APPS = [
+              ("V2 Control Tower", "https://cold-chain-api-xsceu8pzmbemnpx4kiqd9t.streamlit.app/"),
+              ("V1 Legacy Dashboard", "https://cold-chain-api-jhzb9pxulhduzxjdmcn4xt.streamlit.app/"),
+          ]
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              for name, url in APPS:
+                  page = browser.new_page()
+                  try:
+                      print(f"Checking {name}: {url}")
+                      page.goto(url, timeout=60000)
+                      page.wait_for_timeout(5000)
+
+                      # If Streamlit put it to sleep, click the wake button
+                      wake_btn = page.get_by_role("button", name="Yes, get this app back up!")
+                      if wake_btn.is_visible():
+                          print(f"  -> {name} was asleep. Clicking wake-up button...")
+                          wake_btn.click()
+                          page.wait_for_selector("div[data-testid='stAppViewContainer']", timeout=90000)
+                          print(f"  -> {name} is now AWAKE!")
+                      else:
+                          print(f"  -> {name} is already AWAKE and loaded!")
+                  except Exception as e:
+                      print(f"  -> Warning checking {name}: {e}")
+                  finally:
+                      page.close()
+              browser.close()
+          EOF
