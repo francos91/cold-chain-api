@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 import requests
 from supabase import Client, create_client
 
+try:
+  from carbon_calculator import calculate_cold_chain_carbon
+except ImportError:
+  from Backend.carbon_calculator import calculate_cold_chain_carbon
+
 logger = logging.getLogger("coldchain-agent")
 router = APIRouter(prefix="/api/v1/agent", tags=["AI Operations Copilot"])
 
@@ -530,6 +535,46 @@ def simulate_modal_shift_economics(
   })
 
 
+def run_cold_chain_carbon_accounting(
+    distance_km: float,
+    cargo_weight_tonnes: float,
+    temperature_regime: str = "chilled",
+    refrigeration_hours: Optional[float] = None,
+    route_direction: str = "to_coast",
+    trailer_type: str = "tri_axle_reefer",
+    empty_distance_km: Optional[float] = None,
+    empty_running_pct: float = 0.0,
+    average_speed_kmh: float = 65.0,
+    dwell_and_precool_hours: float = 0.0,
+    distribution_loss_pct: float = 0.0,
+    **kwargs,
+) -> str:
+  """Executes the deterministic Stellenbosch & GLEC v3.1 carbon accounting engine."""
+  try:
+    result = calculate_cold_chain_carbon(
+        distance_km=float(distance_km),
+        cargo_weight_tonnes=float(cargo_weight_tonnes),
+        temperature_regime=str(temperature_regime).strip().lower(),
+        refrigeration_hours=(
+            float(refrigeration_hours)
+            if refrigeration_hours is not None
+            else None
+        ),
+        route_direction=str(route_direction).strip().lower(),
+        trailer_type=str(trailer_type).strip().lower(),
+        empty_distance_km=(
+            float(empty_distance_km) if empty_distance_km is not None else None
+        ),
+        empty_running_pct=float(empty_running_pct or 0.0),
+        average_speed_kmh=float(average_speed_kmh or 65.0),
+        dwell_and_precool_hours=float(dwell_and_precool_hours or 0.0),
+        distribution_loss_pct=float(distribution_loss_pct or 0.0),
+    )
+    return json.dumps(result)
+  except Exception as e:
+    return json.dumps({"error": f"Carbon calculation failed: {str(e)}"})
+
+
 # --- SECURITY & HITL VETO GUARDRAIL TOOLS ---
 
 _INJECTION_PATTERNS = [
@@ -624,6 +669,9 @@ AVAILABLE_TOOLS = {
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
     "get_corridor_live_weather": get_corridor_live_weather,
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
+    "calculate_cold_chain_carbon": run_cold_chain_carbon_accounting,
+    "carbon_calculator": run_cold_chain_carbon_accounting,
+    "calculate_emissions": run_cold_chain_carbon_accounting,
     "propose_autonomous_intervention": propose_autonomous_intervention,
     "veto_pending_action": veto_pending_action,
     "knowledge_search": search_cold_chain_knowledge,
@@ -826,6 +874,94 @@ GROQ_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "calculate_cold_chain_carbon",
+            "description": (
+                "MANDATORY deterministic calculator for all cold-chain GHG"
+                " emissions (kg CO2e), diesel fuel usage (L), reefer TRU fuel"
+                " draw, emission intensity (g CO2e/t-km), and product carbon"
+                " footprint (kg CO2e/t cargo). Grounded in Du Plessis, van"
+                " Eeden & Goedhals-Gerber (2023) Stellenbosch empirical"
+                " coefficients and BS EN 16258 / GLEC Framework v3.1."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "distance_km": {
+                        "type": "number",
+                        "description": "Loaded one-way trip distance in km.",
+                    },
+                    "cargo_weight_tonnes": {
+                        "type": "number",
+                        "description": "Payload mass in metric tonnes.",
+                    },
+                    "temperature_regime": {
+                        "type": "string",
+                        "enum": ["chilled", "frozen", "ambient"],
+                        "description": (
+                            "'chilled' (>=0°C, 1.5670 L/hr), 'frozen' (-25°C,"
+                            " 2.0610 L/hr), or 'ambient' (0 L/hr)."
+                        ),
+                    },
+                    "route_direction": {
+                        "type": "string",
+                        "enum": ["to_coast", "to_inland", "other"],
+                        "description": (
+                            "'to_coast' (inland to coastal ports),"
+                            " 'to_inland' (coastal climb inland), or 'other'."
+                        ),
+                    },
+                    "trailer_type": {
+                        "type": "string",
+                        "enum": ["tri_axle_reefer", "interlink_tautliner"],
+                        "description": "Vehicle trailer configuration.",
+                    },
+                    "refrigeration_hours": {
+                        "type": ["number", "null"],
+                        "description": (
+                            "Total active TRU reefer hours. Pass null to"
+                            " estimate from distance, speed, and dwell."
+                        ),
+                    },
+                    "empty_distance_km": {
+                        "type": ["number", "null"],
+                        "description": (
+                            "Explicit empty repositioning distance in km. Pass"
+                            " null if using empty_running_pct."
+                        ),
+                    },
+                    "empty_running_pct": {
+                        "type": "number",
+                        "description": (
+                            "Empty running percentage (0 to 99, e.g. 20 for"
+                            " 20%)."
+                        ),
+                    },
+                    "dwell_and_precool_hours": {
+                        "type": "number",
+                        "description": (
+                            "Extra pre-cooling or terminal dwell hours when"
+                            " refrigeration_hours is null (default 0)."
+                        ),
+                    },
+                    "distribution_loss_pct": {
+                        "type": "number",
+                        "description": (
+                            "Post-harvest spoilage/loss percentage for Eq. (6)"
+                            " footprint uplift (default 0)."
+                        ),
+                    },
+                },
+                "required": [
+                    "distance_km",
+                    "cargo_weight_tonnes",
+                    "temperature_regime",
+                ],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_autonomous_intervention",
             "description": (
                 "REQUIRED whenever a shipment has a temperature breach (>8.0°C)"
@@ -876,6 +1012,11 @@ CONVERSATIONAL CONTEXT & FOLLOW-UP RESOLUTION:
 WEATHER & AMBIENT MONITORING:
 - Always call `get_corridor_live_weather` for any question regarding weather, ambient conditions, or corridor temperature.
 - Report the waypoint name, ambient temperature in °C, humidity percentage, surface pressure in hPa, and any applicable altitude penalty.
+
+CARBON ACCOUNTING & EMISSIONS BENCHMARK:
+- NEVER compute diesel consumption, CO2e emissions, or GLEC emission intensities via mental math.
+- Whenever asked to calculate trip fuel usage, reefer fuel draw, CO2e emissions, or carbon footprint per tonne/t-km, ALWAYS call `calculate_cold_chain_carbon` first, then cite the returned Stellenbosch University (Du Plessis, van Eeden & Goedhals-Gerber, 2023) coefficients and BS EN 16258 / GLEC v3.1 metrics.
+- Use `simulate_modal_shift_economics` ONLY when specifically comparing road-to-rail modal shift scenarios.
 
 OPERATIONAL COST-TO-SERVE BENCHMARK:
 - Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
