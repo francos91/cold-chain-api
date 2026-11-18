@@ -44,7 +44,6 @@ This pipeline was developed to address the challenge of real-time logistics moni
   * `2_Thermal_Tracking.py`: High-frequency temperature curves matched against corridor averages and GPS route maps.
   * `3_Intermodal_Simulator.py`: Road vs. rail freight shift modeling under ISO 14083 emissions factors.
   * `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent (`60s` request timeout) with persona role selectors, curated autonomous tool triggers, stateful conversation context passing, LLMOps thumbs feedback logging, and a live 60-second HITL Veto Guardrail banner with countdown progress bars and one-click override controls.
-
 ## Repository Structure
 ```
 cold-chain-api/
@@ -84,6 +83,7 @@ cold-chain-api/
 ├── requirements.txt               # Backend / core dependencies
 └── system_architecture_v5.jpg     # V2 microservices, GenAI & HITL guardrail architecture diagram
 ```
+
 ## Two-Stage Machine Learning Architecture
 
 This project utilizes a two-stage machine learning pipeline, separating the generation of realistic synthetic telemetry from the real-time operational dashboard.
@@ -109,6 +109,7 @@ This repository implements rigorous software engineering practices tailored for 
 * **Automated CI/CD & Keep-Alive**: Powered by GitHub Actions (`.github/workflows/ci.yml` and `.github/workflows/keep_alive.yml`), running automated linting, test suites, mock environment builds on every push/PR targeting `main`, and scheduled container health pings.
 * **Unit Test Suite (`tests/`)**: 
   - `test_api.py`: Validates FastAPI backend response contracts, JSON schema stability, and agent endpoints.
+  - `test_copilot_guardrails.py`: Validates Du Plessis / GLEC carbon calculation accuracy, tool routing dispatcher boundaries, security SQL/prompt injection firewalls, and CI model skip safety guards.
   - `test_ml_model.py`: Checks feature shape alignment and inference reliability for machine learning models.
   - `test_physics.py`: Verifies ISO 14083 carbon accounting, effective tax rate calculations (R28.00/tCO2), and cost-to-serve mathematics.
   - `test_thermal.py`: Validates thermal excursion boundary logic and thermodynamic drift thresholds for perishable cargo safety.
