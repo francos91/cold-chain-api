@@ -936,12 +936,11 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # 3. FULL AUTONOMY: The model decides exactly what tool it needs based on the query.
+      # 3. FULL AUTONOMY: tool_choice omitted so Groq decides natively without mismatches.
       completion = await groq_client.chat.completions.create(
           model=ACTIVE_MODEL,
           messages=messages,
           tools=GROQ_TOOLS,
-          tool_choice="auto",
           temperature=0.1,
           max_tokens=900,
       )
@@ -1010,7 +1009,7 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call after tools have run
+    # Final synthesis call after tools have run (tool_choice also omitted here for safety)
     final_res = await groq_client.chat.completions.create(
         model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
     )
