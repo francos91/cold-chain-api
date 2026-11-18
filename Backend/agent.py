@@ -120,7 +120,7 @@ def _embed_query_gemini(query: str) -> List[float]:
       "taskType": "RETRIEVAL_QUERY",
       "outputDimensionality": 768,
   }
-  r = requests.post(url, json=payload, timeout=12)
+  r = requests.post(url, json=payload, timeout=5)
   r.raise_for_status()
   vec = _normalize_vec(r.json()["embedding"]["values"])
 
@@ -962,10 +962,11 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # 3. FULL AUTONOMY: tool_choice omitted so Groq decides natively, with 429 failover.
+      # 3. FULL AUTONOMY: tool_choice="auto" paired with 429 failover.
       completion = await _create_completion_with_fallback(
           messages=messages,
           tools=GROQ_TOOLS,
+          tool_choice="auto",
           temperature=0.1,
           max_tokens=900,
       )
@@ -1034,7 +1035,7 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call after tools have run (with 429 failover)
+    # Final synthesis call after tools have run
     final_res = await _create_completion_with_fallback(
         messages=messages, temperature=0.1, max_tokens=1000
     )
