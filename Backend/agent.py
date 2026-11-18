@@ -693,8 +693,9 @@ GROQ_TOOLS = [
                 " GLEC/ISO 14083 carbon accounting, retail logistics reports,"
                 " PPECB thermal SOPs, and supply chain engineering research)."
                 " REQUIRED whenever asked about regulations, legislation,"
-                " emission factors, cold-chain standards, or academic/industry"
-                " benchmarks."
+                " cold-chain standards, or academic/industry benchmarks. NEVER"
+                " use to compute shipment-level diesel, fuel, CO2e, or g"
+                " CO2e/t-km."
             ),
             "parameters": {
                 "type": "object",
@@ -704,8 +705,7 @@ GROQ_TOOLS = [
                         "description": (
                             "Targeted search query combining key concepts and"
                             " exact terms (e.g., 'Carbon Tax Act 15 of 2019"
-                            " tax-free allowance schedule' or 'refrigerated"
-                            " road transport fuel emissions')."
+                            " tax-free allowance schedule')."
                         ),
                     },
                     "category": {
@@ -876,10 +876,14 @@ GROQ_TOOLS = [
         "function": {
             "name": "calculate_cold_chain_carbon",
             "description": (
-                "MANDATORY EXECUTION TOOL. You MUST call this function for ANY "
-                "request mentioning carbon calculations, fuel consumption, diesel "
-                "burn, CO2e emissions, or emission intensity. NEVER compute fuel or "
-                "emissions manually or via RAG text search when this tool is available."
+                "MANDATORY deterministic calculator for all cold-chain GHG"
+                " emissions (kg CO2e), diesel fuel usage (L), reefer TRU fuel"
+                " draw, emission intensity (g CO2e/t-km), and product carbon"
+                " footprint (kg CO2e/t cargo). Grounded in Du Plessis, van"
+                " Eeden & Goedhals-Gerber (2023) Stellenbosch empirical"
+                " coefficients and BS EN 16258 / GLEC Framework v3.1."
+                " NEVER compute fuel or emissions manually or via RAG text"
+                " search when this tool is available."
             ),
             "parameters": {
                 "type": "object",
@@ -1012,8 +1016,8 @@ WEATHER & AMBIENT MONITORING:
 - Report the waypoint name, ambient temperature in °C, humidity percentage, surface pressure in hPa, and any applicable altitude penalty.
 
 CARBON ACCOUNTING & EMISSIONS BENCHMARK:
-- NEVER compute diesel consumption, CO2e emissions, or GLEC emission intensities via mental math.
-- Whenever asked to calculate trip fuel usage, reefer fuel draw, CO2e emissions, or carbon footprint per tonne/t-km, ALWAYS call `calculate_cold_chain_carbon` first, then cite the returned Stellenbosch University (Du Plessis, van Eeden & Goedhals-Gerber, 2023) coefficients and BS EN 16258 / GLEC v3.1 metrics.
+- NEVER compute diesel consumption, CO2e emissions, or GLEC emission intensities via mental math or RAG text search.
+- Whenever asked to calculate trip fuel usage, reefer fuel draw, CO2e emissions, or carbon footprint per tonne/t-km, ALWAYS call `calculate_cold_chain_carbon` first (it contains all built-in Stellenbosch empirical regression coefficients—never ask the user for L/km fuel consumption), then cite the returned Stellenbosch University (Du Plessis, van Eeden & Goedhals-Gerber, 2023) coefficients and BS EN 16258 / GLEC v3.1 metrics.
 - Use `simulate_modal_shift_economics` ONLY when specifically comparing road-to-rail modal shift scenarios.
 
 OPERATIONAL COST-TO-SERVE BENCHMARK:
@@ -1055,6 +1059,53 @@ class AgentQueryRequest(BaseModel):
 
 class AgentQueryResponse(BaseModel):
   response: str
+
+
+def _is_carbon_calculation_query(query: str) -> bool:
+  """Detects explicit trip fuel/CO2e calculation requests (excluding tax/legislation/rail queries)."""
+  q = query.lower()
+  if any(
+      leg in q
+      for leg in [
+          "act",
+          "tax",
+          "legislation",
+          "schedule",
+          "allowance",
+          "ppecb",
+          "sop",
+          "modal shift",
+          "rail",
+      ]
+  ):
+    return False
+  has_metric = any(
+      m in q
+      for m in [
+          "diesel",
+          "fuel",
+          "co2",
+          "co2e",
+          "emission intensity",
+          "carbon footprint",
+          "emissions",
+      ]
+  )
+  has_trip_context = any(
+      t in q
+      for t in [
+          "km",
+          "tonne",
+          "tonnes",
+          "reefer",
+          "chilled",
+          "frozen",
+          "calculate",
+          "compute",
+          "trip",
+      ]
+  )
+  return has_metric and has_trip_context
 
 
 @router.post("/query", response_model=AgentQueryResponse)
@@ -1101,6 +1152,7 @@ async def query_agent(payload: AgentQueryRequest):
   clean_query = sanitize_operator_input(payload.user_query)
   messages.append({"role": "user", "content": clean_query})
 
+  force_carbon_turn_1 = _is_carbon_calculation_query(clean_query)
   max_tool_iterations = 3
   iteration = 0
   empty_retried = False
@@ -1109,11 +1161,20 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
+      turn_tool_choice = (
+          {
+              "type": "function",
+              "function": {"name": "calculate_cold_chain_carbon"},
+          }
+          if (iteration == 1 and force_carbon_turn_1)
+          else "auto"
+      )
+
       # 3. FULL AUTONOMY: tool_choice="auto" paired with 429 failover & expanded token headroom.
       completion = await _create_completion_with_fallback(
           messages=messages,
           tools=GROQ_TOOLS,
-          tool_choice="auto",
+          tool_choice=turn_tool_choice,
           reasoning_effort="low",
           temperature=0.1,
           max_tokens=2048,
