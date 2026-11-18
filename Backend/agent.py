@@ -739,8 +739,9 @@ GROQ_TOOLS = [
             "name": "get_active_fleet_telemetry",
             "description": (
                 "Fetches real-time shipment records from Supabase. Use for"
-                " live status, highest temperature excursions, individual route"
-                " costs, or checking specific shipments."
+                " live status, highest temperature excursions, active fleet"
+                " spend/cost-to-serve calculations, or checking specific"
+                " shipments."
             ),
             "parameters": {
                 "type": "object",
@@ -963,26 +964,45 @@ async def query_agent(payload: AgentQueryRequest):
 
   max_tool_iterations = 3
   iteration = 0
+  empty_retried = False
 
   try:
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # 3. FULL AUTONOMY: tool_choice="auto" paired with 429 failover.
+      # 3. FULL AUTONOMY: tool_choice="auto" paired with 429 failover & expanded token headroom.
       completion = await _create_completion_with_fallback(
           messages=messages,
           tools=GROQ_TOOLS,
           tool_choice="auto",
+          reasoning_effort="low",
           temperature=0.1,
-          max_tokens=900,
+          max_tokens=2048,
       )
       response_msg = completion.choices[0].message
 
-      # If no tools were called, the agent is ready to reply to the user
+      # If no tools were called, check for empty reasoning-channel turn before replying
       if not response_msg.tool_calls:
         content = response_msg.content
         if content and content.strip():
           return AgentQueryResponse(response=content)
+
+        if not empty_retried:
+          empty_retried = True
+          logger.warning(
+              "Model returned empty content and no tool_calls on iteration %d;"
+              " retrying once with explicit tool/synthesis nudge.",
+              iteration,
+          )
+          messages.append({
+              "role": "system",
+              "content": (
+                  "Your previous response was empty. Either call the"
+                  " appropriate tool to answer the user's question now, or"
+                  " provide a direct, complete text answer."
+              ),
+          })
+          continue
 
         return AgentQueryResponse(
             response=(
@@ -1054,8 +1074,9 @@ async def query_agent(payload: AgentQueryRequest):
         messages=messages,
         tools=GROQ_TOOLS,
         tool_choice="none",
+        reasoning_effort="low",
         temperature=0.1,
-        max_tokens=1000,
+        max_tokens=2048,
     )
     return AgentQueryResponse(
         response=(
