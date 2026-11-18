@@ -107,7 +107,7 @@ def _embed_query_gemini(query: str) -> List[float]:
 def search_cold_chain_knowledge(
     query: str,
     category: Optional[str] = None,
-    top_k: int = 5,
+    top_k: int = 2,
     **kwargs,
 ) -> str:
   """Searches the Hybrid RRF (Semantic Vector + Full-Text Keyword) cold-chain knowledge base."""
@@ -130,8 +130,8 @@ def search_cold_chain_knowledge(
       if category and str(category).strip() in valid_categories
       else None
   )
-  # Strictly capped at 8 to match the GROQ_TOOLS schema max limit
-  safe_k = max(1, min(int(top_k or 5), 8))
+  # Strictly capped at 3 to stay safely within Groq Free Tier TPM limits
+  safe_k = max(1, min(int(top_k or 2), 3))
 
   try:
     query_vec = _embed_query_gemini(clean_q)
@@ -163,7 +163,9 @@ def search_cold_chain_knowledge(
             "category": row.get("category"),
             "page_number": row.get("page_number"),
             "similarity": round(float(row.get("similarity", 0.0)), 3),
-            "excerpt": row.get("content", ""),
+            "excerpt": row.get("content", "")[
+                :300
+            ],  # Truncate excerpt for token efficiency
         }
         for row in rows
     ]
@@ -651,7 +653,7 @@ GROQ_TOOLS = [
                     "top_k": {
                         "type": "integer",
                         "description": (
-                            "Number of chunks to retrieve (default 5, max 8)."
+                            "Number of chunks to retrieve (default 2, max 3)."
                         ),
                     },
                 },
@@ -819,13 +821,15 @@ GROQ_TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
+SYSTEM_PROMPT = """
+You are an autonomous Cold Chain Operations & MEng Logistics Copilot for Franco.
 You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, carbon calculations, and evidence-backed regulatory/research synthesis.
 
-KNOWLEDGE BASE & RAG GROUNDING:
-- You have direct access to `search_cold_chain_knowledge`, which searches indexed South African legislation (Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024), carbon frameworks (ISO 14083, GLEC), retail annual reports, PPECB cold-chain protocols, and logistics engineering research.
-- ALWAYS call `search_cold_chain_knowledge` when asked about policies, carbon tax rules, emission methodology, cold-chain standards, or academic/industry benchmarks.
-- Ground your answers strictly in the retrieved excerpts and explicitly cite the source document and page number (e.g., `[Source: 4248323-5act15of2019carbontaxact.pdf, p. 4]`). Never fabricate statutory sections or numbers not present in the retrieved excerpts.
+CRITICAL DIRECTIVE ON KNOWLEDGE RETRIEVAL & PROACTIVE INTENT:
+- Never require the user to use rigid keywords, technical syntax, or exact filenames. 
+- Whenever the user asks a question about legislation, carbon tax, transport strategies, fleet optimization, supply chain assignments, or academic coursework (even if phrased casually, conversationally, or broadly), you MUST proactively invoke the `search_cold_chain_knowledge` tool.
+- If the user's question is conversational or high-level (e.g., "How do in-house fleets compare to 3PLs?" or "What are our carbon tax obligations?"), intelligently reformulate their intent into a targeted conceptual query string for the tool (e.g., query="pure in-house fleet versus third-party logistics cost-to-serve trade-offs").
+- Ground your answers strictly in the retrieved excerpts and explicitly cite the source document and page number (e.g., `[Source: 4248323-5act15of2019carbontaxact.pdf, p. 52]`). Never fabricate statutory sections or numbers not present in the retrieved excerpts.
 
 DATABASE INTEGRITY & SNAPSHOT AWARENESS:
 - The master database contains approximately 4,500 total shipments across all statuses ('in-transit', 'delayed', and 'delivered').
