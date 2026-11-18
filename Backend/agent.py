@@ -130,6 +130,7 @@ def search_cold_chain_knowledge(
       if category and str(category).strip() in valid_categories
       else None
   )
+  # Strictly capped at 8 to match the GROQ_TOOLS schema max limit
   safe_k = max(1, min(int(top_k or 5), 8))
 
   try:
