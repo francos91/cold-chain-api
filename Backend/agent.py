@@ -876,12 +876,10 @@ GROQ_TOOLS = [
         "function": {
             "name": "calculate_cold_chain_carbon",
             "description": (
-                "MANDATORY deterministic calculator for all cold-chain GHG"
-                " emissions (kg CO2e), diesel fuel usage (L), reefer TRU fuel"
-                " draw, emission intensity (g CO2e/t-km), and product carbon"
-                " footprint (kg CO2e/t cargo). Grounded in Du Plessis, van"
-                " Eeden & Goedhals-Gerber (2023) Stellenbosch empirical"
-                " coefficients and BS EN 16258 / GLEC Framework v3.1."
+                "MANDATORY EXECUTION TOOL. You MUST call this function for ANY "
+                "request mentioning carbon calculations, fuel consumption, diesel "
+                "burn, CO2e emissions, or emission intensity. NEVER compute fuel or "
+                "emissions manually or via RAG text search when this tool is available."
             ),
             "parameters": {
                 "type": "object",
