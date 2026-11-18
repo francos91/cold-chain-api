@@ -672,8 +672,10 @@ GROQ_TOOLS = [
                             None,
                         ],
                         "description": (
-                            "Optional category filter. Pass null to search"
-                            " across all documents."
+                            "Always pass null to search across all indexed"
+                            " documents unless the user explicitly asks only"
+                            " for legislation ('climate_policy_and_carbon') or"
+                            " PPECB SOPs ('thermal_and_sops')."
                         ),
                     },
                     "top_k": {
@@ -856,7 +858,7 @@ You assist operations managers with real-time fleet telemetry, predictive risk a
 CRITICAL DIRECTIVE ON KNOWLEDGE RETRIEVAL & PROACTIVE INTENT:
 - Never require the user to use rigid keywords, technical syntax, or exact filenames. 
 - Whenever the user asks a question about legislation, carbon tax, transport strategies, fleet optimization, supply chain assignments, or academic coursework (even if phrased casually, conversationally, or broadly), you MUST proactively invoke the `search_cold_chain_knowledge` tool.
-- Call `search_cold_chain_knowledge` at most ONCE per user turn, then immediately synthesize your response with citations. Do not loop repeatedly with slightly reworded queries.
+- Call `search_cold_chain_knowledge` at most ONCE per user turn (with category=null unless strictly legislation or SOPs), then immediately synthesize your response with citations. Do not loop repeatedly with slightly reworded queries.
 - If the user's question is conversational or high-level (e.g., "How do in-house fleets compare to 3PLs?" or "What are our carbon tax obligations?"), intelligently reformulate their intent into a targeted conceptual query string for the tool (e.g., query="pure in-house fleet versus third-party logistics cost-to-serve trade-offs").
 - Ground your answers strictly in the retrieved excerpts and explicitly cite the source document and page number (e.g., `[Source: 4248323-5act15of2019carbontaxact.pdf, p. 52]`). Never fabricate statutory sections or numbers not present in the retrieved excerpts.
 
@@ -876,6 +878,7 @@ WEATHER & AMBIENT MONITORING:
 
 OPERATIONAL COST-TO-SERVE BENCHMARK:
 - Formula: Trip Cost (ZAR) = (Distance in km * R18.00) + R200.00 fixed handling fee.
+- Always call `get_active_fleet_telemetry(status_filter="active")` to retrieve `distance_km` for cost-to-serve and active fleet spend calculations.
 - When answering cost questions, ALWAYS calculate and present:
   1. Total Active Fleet Spend (Sum of all active shipment costs).
   2. Average Cost per Shipment.
