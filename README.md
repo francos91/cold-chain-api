@@ -11,7 +11,7 @@ An enterprise-grade, end-to-end data pipeline and decision-support architecture 
 ## Microservices & Docker Architecture (V2 Upgrade)
 The system has been upgraded from a monolithic structure to a decoupled microservices architecture:
 - **Backend API (Docker + Render)**: The core logic is containerized using a custom Dockerfile (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`), running feature transformations, and hosting dedicated data, telemetry, and HITL guardrail routes.
-- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, master database aggregation routines, Random Forest model inference, intermodal carbon tax calculators, and autonomous Human-in-the-Loop (HITL) intervention staging.
+- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing proactive hybrid RRF knowledge retrieval (Supabase `pgvector` + Gemini embeddings), function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, master database aggregation routines, Random Forest model inference, intermodal carbon tax calculators, and autonomous Human-in-the-Loop (HITL) intervention staging.
 - **Frontend Client (`Overview.py` & Multi-Page Suite)**: The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex database queries locally. Instead, it consumes pre-processed datasets, telemetry streams, and agent endpoints directly from the Dockerized FastAPI backend.
 - **Data Ingestion Sanitation**: Automatic normalization standardizes shipment status values (`in-transit`, `delayed`, `delivered`) across the API and frontend caches, eliminating duplicate entries in the filter dropdowns and analytics charts.
 - **Parallel Hosting**: Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards run concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
@@ -26,6 +26,7 @@ This pipeline was developed to address the challenge of real-time logistics moni
 ### Technical Architecture
 - **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to ingest telemetry data and serve analytical payloads in real time.
 - **AI Agent Copilot & Safety Guardrails (Groq LPU Engine)**: A dedicated reasoning layer (`Backend/agent.py`) using `openai/gpt-oss-20b` with autonomous multi-turn tool calling and deterministic safety controls:
+  * `search_cold_chain_knowledge`: Proactive Hybrid RRF knowledge retrieval (semantic vector + keyword search) over 1,842 indexed chunks (South African Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024, MEng coursework, and RetailCo transport assignments). Tuned with optimized chunk constraints (`top_k=2`, max 3) and character truncation (~300 chars) to prevent Groq free-tier token limit errors while preserving exact page-level citations.
   * `get_fleet_aggregate_summary`: Executes whole-database aggregations across all 4,500 records in Supabase PostgreSQL to calculate global status distributions (`delivered`, `in-transit`, `delayed`), top origin hubs, and leading delivery destinations without row-slice hallucination.
   * `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions (> 8.0°C), supporting granular status filters (`active`, `in-transit`, `delayed`, `delivered`, `all`) and calculating fleet-wide cost-to-serve metrics.
   * `predict_temperature_breach_risk`: Containerized Random Forest inference with dynamic route distance lookups, nullable schema validation, and physics-based heuristic floors for what-if route dispatches.
@@ -114,7 +115,7 @@ This repository implements rigorous software engineering practices tailored for 
   - `test_thermal.py`: Validates thermal excursion boundary logic and thermodynamic drift thresholds for perishable cargo safety.
 
 ## Key Features
-- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b`), capable of multi-turn tool execution, role-adapted responses (`Operations Manager`, `Executive`, `Dispatcher`), and stateful conversation memory across turns.
+- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b`), capable of proactive RAG knowledge retrieval, multi-turn tool execution, role-adapted responses (`Operations Manager`, `Executive`, `Dispatcher`), and stateful conversation memory across turns.
 - **Human-in-the-Loop (HITL) 60-Second Veto Guardrail**: Automatically stages corrective interventions in Supabase (`pending_agent_actions`) whenever active shipments exceed 8.0°C or breach probability reaches CRITICAL RISK (>= 40.0%), giving human dispatchers a 60-second countdown window to override via the Control Tower UI (`POST /api/v1/agent/actions/{action_id}/veto`) before execution.
 - **Deterministic Input Sanitization Firewall**: Blocks prompt-injection and SQL injection patterns (`HTTP 400`) prior to LLM tool-calling execution.
 - **Master Fleet Aggregation Intelligence**: A dedicated analytics tool (`get_fleet_aggregate_summary`) providing instant counts across all ~4,500 historical shipments, eliminating LLM sampling bias and distinguishing delivered cargo from active in-transit shipments.
@@ -182,7 +183,8 @@ South Africa-Specific Literature Sources:
 - [x] Integrate master database aggregation tooling (`get_fleet_aggregate_summary`) to eliminate delivered shipment hallucinations.
 - [x] Deploy resilient weather telemetry using in-memory TTL caching and regional South African climatology fallbacks to counter HTTP 429 rate limits.
 - [x] Implement deterministic prompt/SQL input sanitization and a 60-second Human-in-the-Loop (HITL) Veto Guardrail state machine (`pending_agent_actions` + `pgvector`) with real-time Streamlit countdown override controls.
-- [ ] Build a multi-index RAG knowledge base over cold-chain SOPs and Arrhenius spoilage curves using Supabase `pgvector`.
+- [x] Optimize RAG chunk retrieval constraints (`top_k=2` capped at max 3, ~300 character slicing) to eliminate Groq free-tier TPM rate-limit errors.
+- [x] Implement proactive conversational intent mapping in `SYSTEM_PROMPT` for seamless, keyword-free knowledge base querying.
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets incorporating KERS downhill physics, Virtual Wheeling PPA arbitrage, and Eskom Megaflex tariffs (Master's Research Proposal core objective).
 - [ ] Implement automated push notifications (Email/SMS webhook) for active fleet temperature excursions.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
@@ -197,3 +199,4 @@ To view a copy of this license, visit https://creativecommons.org/licenses/by-nc
 Under this license:
 - You are free to view, share, and adapt this work for academic, educational, or non-commercial research purposes.
 - Commercial exploitation, resale, or closed-source redistribution without prior written consent from the author is strictly prohibited.
+```
