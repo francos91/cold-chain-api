@@ -138,7 +138,7 @@ def search_cold_chain_knowledge(
     rpc_params = {
         "query_embedding": query_vec,
         "query_text": clean_q,
-        "match_threshold": 0.15,  # Lowered from 0.30 to ensure active indexed docs return matches immediately
+        "match_threshold": 0.15,  # Lowered threshold to ensure active indexed docs return matches immediately
         "match_count": safe_k,
         "filter_category": clean_cat,
     }
@@ -978,7 +978,10 @@ async def query_agent(payload: AgentQueryRequest):
 
       # Execute each tool call emitted
       for tool_call in response_msg.tool_calls:
-        func_name = tool_call.function.name
+        raw_func_name = tool_call.function.name
+        # Sanitize function name to strip leaked channel tokens like <|channel|>commentary
+        func_name = raw_func_name.split("<|")[0].strip()
+
         try:
           func_args = json.loads(tool_call.function.arguments or "{}")
         except Exception:
@@ -987,7 +990,7 @@ async def query_agent(payload: AgentQueryRequest):
         tool_func = AVAILABLE_TOOLS.get(func_name)
 
         if tool_func:
-          logger.info("Iteration %d | Executing tool: %s", iteration, func_name)
+          logger.info("Iteration %d | Executing tool: %s (sanitized from %s)", iteration, func_name, raw_func_name)
           try:
             tool_output = tool_func(**func_args)
           except Exception as err:
