@@ -138,7 +138,7 @@ def search_cold_chain_knowledge(
     rpc_params = {
         "query_embedding": query_vec,
         "query_text": clean_q,
-        "match_threshold": 0.30,
+        "match_threshold": 0.15,  # Lowered from 0.30 to ensure active indexed docs return matches immediately
         "match_count": safe_k,
         "filter_category": clean_cat,
     }
