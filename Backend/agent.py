@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/v1/agent", tags=["AI Operations Copilot"])
 
 # 1. Environment variables with CI fallbacks
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
 
@@ -26,6 +28,10 @@ ACTIVE_MODEL = "openai/gpt-oss-20b"
 
 if not GROQ_API_KEY:
   logger.warning("GROQ_API_KEY is not set in environment.")
+if not GEMINI_API_KEY:
+  logger.warning(
+      "GEMINI_API_KEY is not set in environment — RAG vector search disabled."
+  )
 
 try:
   supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -47,6 +53,7 @@ except Exception as e:
 # Weather caching & regional telemetry safeguards
 _WEATHER_CACHE: Dict[str, Any] = {}
 _CACHE_TTL_SECONDS = 600  # 10-minute cache to protect shared Render IP from rate limits
+_EMBED_CACHE: Dict[str, List[float]] = {}
 
 REGIONAL_FALLBACK_WEATHER = {
     "beaufort west": {"temp": 28.5, "humidity": 22.0, "pressure": 918.0},
@@ -64,6 +71,105 @@ REGIONAL_FALLBACK_WEATHER = {
 
 
 # --- 2. EXECUTABLE TOOLS ---
+
+
+def _normalize_vec(values: List[float]) -> List[float]:
+  norm = math.sqrt(sum(x * x for x in values))
+  return [x / norm for x in values] if norm > 0 else values
+
+
+def _embed_query_gemini(query: str) -> List[float]:
+  """Embeds a user search query with Gemini Embedding 001 (768-dim L2-normalized)."""
+  cache_key = query.strip().lower()
+  if cache_key in _EMBED_CACHE:
+    return _EMBED_CACHE[cache_key]
+
+  if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY is missing in Render environment.")
+
+  url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
+  payload = {
+      "model": "models/gemini-embedding-001",
+      "content": {"parts": [{"text": query}]},
+      "taskType": "RETRIEVAL_QUERY",
+      "outputDimensionality": 768,
+  }
+  r = requests.post(url, json=payload, timeout=12)
+  r.raise_for_status()
+  vec = _normalize_vec(r.json()["embedding"]["values"])
+
+  if len(_EMBED_CACHE) >= 64:
+    _EMBED_CACHE.pop(next(iter(_EMBED_CACHE)))
+  _EMBED_CACHE[cache_key] = vec
+  return vec
+
+
+def search_cold_chain_knowledge(
+    query: str,
+    category: Optional[str] = None,
+    top_k: int = 5,
+    **kwargs,
+) -> str:
+  """Searches the Hybrid RRF (Semantic Vector + Full-Text Keyword) cold-chain knowledge base."""
+  if not supabase:
+    return json.dumps({"error": "Supabase client is not connected."})
+  if not query or not str(query).strip():
+    return json.dumps({"error": "Search query cannot be empty."})
+
+  clean_q = str(query).strip()[:500]
+  valid_categories = {
+      "retail_and_industry_reports",
+      "climate_policy_and_carbon",
+      "thermal_and_sops",
+      "government_and_industry",
+      "meng_coursework_and_assignments",
+      "general",
+  }
+  clean_cat = (
+      category.strip()
+      if category and str(category).strip() in valid_categories
+      else None
+  )
+  safe_k = max(1, min(int(top_k or 5), 8))
+
+  try:
+    query_vec = _embed_query_gemini(clean_q)
+    rpc_params = {
+        "query_embedding": query_vec,
+        "query_text": clean_q,
+        "match_threshold": 0.30,
+        "match_count": safe_k,
+        "filter_category": clean_cat,
+    }
+    res = supabase.rpc("match_cold_chain_docs", rpc_params).execute()
+    rows = res.data or []
+
+    if not rows and clean_cat is not None:
+      # Retry across all categories if strict category filter yielded zero matches
+      rpc_params["filter_category"] = None
+      res = supabase.rpc("match_cold_chain_docs", rpc_params).execute()
+      rows = res.data or []
+
+    if not rows:
+      return json.dumps({
+          "matches": [],
+          "message": "No matching passages found in the knowledge base.",
+      })
+
+    formatted_matches = [
+        {
+            "source_file": row.get("source_file"),
+            "category": row.get("category"),
+            "page_number": row.get("page_number"),
+            "similarity": round(float(row.get("similarity", 0.0)), 3),
+            "excerpt": row.get("content", ""),
+        }
+        for row in rows
+    ]
+    return json.dumps({"matches": formatted_matches})
+  except Exception as e:
+    logger.warning("Knowledge base retrieval failed: %s", e)
+    return json.dumps({"error": f"Knowledge base search failed: {str(e)}"})
 
 
 def get_active_fleet_telemetry(
@@ -483,6 +589,7 @@ def veto_pending_action(action_id: str = "", **kwargs) -> str:
 
 
 AVAILABLE_TOOLS = {
+    "search_cold_chain_knowledge": search_cold_chain_knowledge,
     "get_active_fleet_telemetry": get_active_fleet_telemetry,
     "get_fleet_aggregate_summary": get_fleet_aggregate_summary,
     "predict_temperature_breach_risk": predict_temperature_breach_risk,
@@ -490,6 +597,7 @@ AVAILABLE_TOOLS = {
     "simulate_modal_shift_economics": simulate_modal_shift_economics,
     "propose_autonomous_intervention": propose_autonomous_intervention,
     "veto_pending_action": veto_pending_action,
+    "knowledge_search": search_cold_chain_knowledge,
     "fleet_aggregate": get_fleet_aggregate_summary,
     "weather_monitoring": get_corridor_live_weather,
     "get_weather": get_corridor_live_weather,
@@ -498,6 +606,58 @@ AVAILABLE_TOOLS = {
 }
 
 GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_cold_chain_knowledge",
+            "description": (
+                "Searches the indexed Cold Chain Knowledge Base (South African"
+                " Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024,"
+                " GLEC/ISO 14083 carbon accounting, retail logistics reports,"
+                " PPECB thermal SOPs, and supply chain engineering research)."
+                " REQUIRED whenever asked about regulations, legislation,"
+                " emission factors, cold-chain standards, or academic/industry"
+                " benchmarks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Targeted search query combining key concepts and"
+                            " exact terms (e.g., 'Carbon Tax Act 15 of 2019"
+                            " tax-free allowance schedule' or 'refrigerated"
+                            " road transport fuel emissions')."
+                        ),
+                    },
+                    "category": {
+                        "type": ["string", "null"],
+                        "enum": [
+                            "retail_and_industry_reports",
+                            "climate_policy_and_carbon",
+                            "thermal_and_sops",
+                            "government_and_industry",
+                            "meng_coursework_and_assignments",
+                            "general",
+                            None,
+                        ],
+                        "description": (
+                            "Optional category filter. Pass null to search"
+                            " across all documents."
+                        ),
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": (
+                            "Number of chunks to retrieve (default 5, max 8)."
+                        ),
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -659,7 +819,12 @@ GROQ_TOOLS = [
 ]
 
 SYSTEM_PROMPT = """You are the AI Control Tower Copilot for South Africa's Cold Chain Logistics Network.
-You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, and carbon calculations.
+You assist operations managers with real-time fleet telemetry, predictive risk assessments, weather monitoring, cost-to-serve analytics, carbon calculations, and evidence-backed regulatory/research synthesis.
+
+KNOWLEDGE BASE & RAG GROUNDING:
+- You have direct access to `search_cold_chain_knowledge`, which searches indexed South African legislation (Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024), carbon frameworks (ISO 14083, GLEC), retail annual reports, PPECB cold-chain protocols, and logistics engineering research.
+- ALWAYS call `search_cold_chain_knowledge` when asked about policies, carbon tax rules, emission methodology, cold-chain standards, or academic/industry benchmarks.
+- Ground your answers strictly in the retrieved excerpts and explicitly cite the source document and page number (e.g., `[Source: 4248323-5act15of2019carbontaxact.pdf, p. 4]`). Never fabricate statutory sections or numbers not present in the retrieved excerpts.
 
 DATABASE INTEGRITY & SNAPSHOT AWARENESS:
 - The master database contains approximately 4,500 total shipments across all statuses ('in-transit', 'delayed', and 'delivered').
