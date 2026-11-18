@@ -678,6 +678,8 @@ GROQ_TOOLS = [
                     },
                     "top_k": {
                         "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
                         "description": (
                             "Number of chunks to retrieve (default 2, max 3)."
                         ),
@@ -854,6 +856,7 @@ You assist operations managers with real-time fleet telemetry, predictive risk a
 CRITICAL DIRECTIVE ON KNOWLEDGE RETRIEVAL & PROACTIVE INTENT:
 - Never require the user to use rigid keywords, technical syntax, or exact filenames. 
 - Whenever the user asks a question about legislation, carbon tax, transport strategies, fleet optimization, supply chain assignments, or academic coursework (even if phrased casually, conversationally, or broadly), you MUST proactively invoke the `search_cold_chain_knowledge` tool.
+- Call `search_cold_chain_knowledge` at most ONCE per user turn, then immediately synthesize your response with citations. Do not loop repeatedly with slightly reworded queries.
 - If the user's question is conversational or high-level (e.g., "How do in-house fleets compare to 3PLs?" or "What are our carbon tax obligations?"), intelligently reformulate their intent into a targeted conceptual query string for the tool (e.g., query="pure in-house fleet versus third-party logistics cost-to-serve trade-offs").
 - Ground your answers strictly in the retrieved excerpts and explicitly cite the source document and page number (e.g., `[Source: 4248323-5act15of2019carbontaxact.pdf, p. 52]`). Never fabricate statutory sections or numbers not present in the retrieved excerpts.
 
@@ -1035,9 +1038,21 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call after tools have run
+    # Force synthesis without further tool calls
+    messages.append({
+        "role": "system",
+        "content": (
+            "Tool execution budget reached. Do NOT call any further tools."
+            " Provide your final answer now using only the retrieved results"
+            " above."
+        ),
+    })
     final_res = await _create_completion_with_fallback(
-        messages=messages, temperature=0.1, max_tokens=1000
+        messages=messages,
+        tools=GROQ_TOOLS,
+        tool_choice="none",
+        temperature=0.1,
+        max_tokens=1000,
     )
     return AgentQueryResponse(
         response=(
