@@ -11,8 +11,8 @@ An enterprise-grade, end-to-end data pipeline and decision-support architecture 
 ## Microservices & Docker Architecture (V2 Upgrade)
 The system has been upgraded from a monolithic structure to a decoupled microservices architecture:
 - **Backend API (Docker + Render)**: The core logic is containerized using a custom Dockerfile (Python 3.11) and deployed on Render (`https://cold-chain-api-docker.onrender.com/api/dashboard`). This FastAPI service acts as the central data engine, loading the machine learning models (`advanced_model.pkl`, `le_route.pkl`), running feature transformations, and hosting dedicated data, telemetry, and HITL guardrail routes.
-- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing proactive hybrid RRF knowledge retrieval (Supabase `pgvector` + Gemini embeddings), function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, master database aggregation routines, Random Forest model inference, intermodal carbon tax calculators, and autonomous Human-in-the-Loop (HITL) intervention staging.
-- **Frontend Client (`Overview.py` & Multi-Page Suite)**: The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex database queries locally. Instead, it consumes pre-processed datasets, telemetry streams, and agent endpoints directly from the Dockerized FastAPI backend.
+- **Autonomous AI Operations Copilot (`Backend/agent.py`)**: An operational agent deployed on Groq's high-speed inference engine (`openai/gpt-oss-20b` with automatic HTTP 429 rate-limit failover to `openai/gpt-oss-120b`). It provides sub-2-second conversational reasoning over the `/api/v1/agent/query` route, utilizing proactive Hybrid RRF knowledge retrieval (Supabase `pgvector` + Gemini `gemini-embedding-001` 768-dim L2-normalized embeddings), function-calling across live Supabase fleet telemetry, Open-Meteo weather feeds, master database aggregation routines, Random Forest model inference, intermodal carbon tax calculators, and autonomous Human-in-the-Loop (HITL) intervention staging.
+- **Frontend Client (`Overview.py` & Multi-Page Suite)**: The V2 Streamlit dashboard acts purely as a lightweight HTTP client. It no longer stores database secrets or runs complex database queries locally. Instead, it consumes pre-processed datasets, telemetry streams, and agent endpoints (with a 60-second HTTP timeout accommodating Render cold starts, hybrid vector searches, and model failover) directly from the Dockerized FastAPI backend.
 - **Data Ingestion Sanitation**: Automatic normalization standardizes shipment status values (`in-transit`, `delayed`, `delivered`) across the API and frontend caches, eliminating duplicate entries in the filter dropdowns and analytics charts.
 - **Parallel Hosting**: Both V1 (`dashboard/app.py`) and V2 (`Overview.py`) dashboards run concurrently on Streamlit Cloud using independent entry points within the same GitHub repository, ensuring zero downtime during architectural transitions.
 
@@ -25,10 +25,10 @@ This pipeline was developed to address the challenge of real-time logistics moni
 
 ### Technical Architecture
 - **Data Ingestion (Backend)**: A FastAPI service deployed on Render, handling REST API requests to ingest telemetry data and serve analytical payloads in real time.
-- **AI Agent Copilot & Safety Guardrails (Groq LPU Engine)**: A dedicated reasoning layer (`Backend/agent.py`) using `openai/gpt-oss-20b` with autonomous multi-turn tool calling and deterministic safety controls:
-  * `search_cold_chain_knowledge`: Proactive Hybrid RRF knowledge retrieval (semantic vector + keyword search) over 1,842 indexed chunks (South African Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024, MEng coursework, and RetailCo transport assignments). Tuned with optimized chunk constraints (`top_k=2`, max 3) and character truncation (~300 chars) to prevent Groq free-tier token limit errors while preserving exact page-level citations.
+- **AI Agent Copilot & Safety Guardrails (Groq LPU Engine)**: A dedicated reasoning layer (`Backend/agent.py`) running `openai/gpt-oss-20b` with automatic 429 failover to `openai/gpt-oss-120b`, configured with `reasoning_effort="low"`, `max_tokens=2048`, an automatic empty-turn retry guard, single-pass RAG synthesis, and explicit `tool_choice="none"` final synthesis to prevent `tool_use_failed` HTTP 400 loops:
+  * `search_cold_chain_knowledge`: Proactive Hybrid RRF knowledge retrieval (semantic cosine vector + full-text keyword search) across 6 indexed domains (`retail_and_industry_reports`, `climate_policy_and_carbon`, `thermal_and_sops`, `government_and_industry`, `meng_coursework_and_assignments`, `general`) spanning 1,842 chunks—covering South African Carbon Tax Act 15 of 2019, Climate Change Act 22 of 2024, PPECB thermal SOPs, GLEC / ISO 14083 emission factor studies, Vehicle Routing Problem with Backhauls (VRPB) literature, and RetailCo transport strategy assignments. Defaults to cross-category retrieval (`filter_category=null`) with `top_k=2` (capped at max 3) and ~300-character excerpt slicing to stay safely within Groq free-tier TPM limits while preserving exact page-level citations.
   * `get_fleet_aggregate_summary`: Executes whole-database aggregations across all 4,500 records in Supabase PostgreSQL to calculate global status distributions (`delivered`, `in-transit`, `delayed`), top origin hubs, and leading delivery destinations without row-slice hallucination.
-  * `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions (> 8.0°C), supporting granular status filters (`active`, `in-transit`, `delayed`, `delivered`, `all`) and calculating fleet-wide cost-to-serve metrics.
+  * `get_active_fleet_telemetry`: Direct Supabase querying to audit active fleet excursions (> 8.0°C), supporting granular status filters (`active`, `in-transit`, `delayed`, `delivered`, `all`) and calculating active fleet spend and cost-to-serve metrics (`(Distance km * R18.00) + R200.00`).
   * `predict_temperature_breach_risk`: Containerized Random Forest inference with dynamic route distance lookups, nullable schema validation, and physics-based heuristic floors for what-if route dispatches.
   * `get_corridor_live_weather`: Open-Meteo integration backed by a 10-minute in-memory TTL cache and deterministic South African regional climatology fallbacks (Karoo, Highveld, Coastal) to eliminate upstream HTTP 429 rate-limiting on shared container egress IPs.
   * `simulate_modal_shift_economics`: Activity-based carbon accounting and South African Carbon Tax savings (R28.00/tCO2) under statutory basic tax exemptions.
@@ -43,7 +43,7 @@ This pipeline was developed to address the challenge of real-time logistics moni
   * `1_Risk_Intelligence.py`: Dynamic breach probability slider with partial-page rendering via `@st.fragment`.
   * `2_Thermal_Tracking.py`: High-frequency temperature curves matched against corridor averages and GPS route maps.
   * `3_Intermodal_Simulator.py`: Road vs. rail freight shift modeling under ISO 14083 emissions factors.
-  * `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent with persona role selectors, stateful conversation context passing, LLMOps thumbs feedback logging, and a live 60-second HITL Veto Guardrail banner with countdown progress bars and one-click override controls.
+  * `4_AI_Copilot.py`: Real-time chat interface connecting operators directly to the Groq operations agent (`60s` request timeout) with persona role selectors, curated autonomous tool triggers, stateful conversation context passing, LLMOps thumbs feedback logging, and a live 60-second HITL Veto Guardrail banner with countdown progress bars and one-click override controls.
 
 ## Repository Structure
 ```
@@ -84,7 +84,6 @@ cold-chain-api/
 ├── requirements.txt               # Backend / core dependencies
 └── system_architecture_v5.jpg     # V2 microservices, GenAI & HITL guardrail architecture diagram
 ```
-
 ## Two-Stage Machine Learning Architecture
 
 This project utilizes a two-stage machine learning pipeline, separating the generation of realistic synthetic telemetry from the real-time operational dashboard.
@@ -115,7 +114,7 @@ This repository implements rigorous software engineering practices tailored for 
   - `test_thermal.py`: Validates thermal excursion boundary logic and thermodynamic drift thresholds for perishable cargo safety.
 
 ## Key Features
-- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b`), capable of proactive RAG knowledge retrieval, multi-turn tool execution, role-adapted responses (`Operations Manager`, `Executive`, `Dispatcher`), and stateful conversation memory across turns.
+- **Autonomous Control Tower Copilot**: Sub-2-second operational intelligence leveraging Groq LPUs (`openai/gpt-oss-20b` with 429 failover to `openai/gpt-oss-120b`), capable of cross-category Hybrid RRF knowledge retrieval, multi-turn tool execution, role-adapted responses (`Operations Manager`, `Executive`, `Dispatcher`), and stateful conversation memory across turns.
 - **Human-in-the-Loop (HITL) 60-Second Veto Guardrail**: Automatically stages corrective interventions in Supabase (`pending_agent_actions`) whenever active shipments exceed 8.0°C or breach probability reaches CRITICAL RISK (>= 40.0%), giving human dispatchers a 60-second countdown window to override via the Control Tower UI (`POST /api/v1/agent/actions/{action_id}/veto`) before execution.
 - **Deterministic Input Sanitization Firewall**: Blocks prompt-injection and SQL injection patterns (`HTTP 400`) prior to LLM tool-calling execution.
 - **Master Fleet Aggregation Intelligence**: A dedicated analytics tool (`get_fleet_aggregate_summary`) providing instant counts across all ~4,500 historical shipments, eliminating LLM sampling bias and distinguishing delivered cargo from active in-transit shipments.
@@ -185,6 +184,7 @@ South Africa-Specific Literature Sources:
 - [x] Implement deterministic prompt/SQL input sanitization and a 60-second Human-in-the-Loop (HITL) Veto Guardrail state machine (`pending_agent_actions` + `pgvector`) with real-time Streamlit countdown override controls.
 - [x] Optimize RAG chunk retrieval constraints (`top_k=2` capped at max 3, ~300 character slicing) to eliminate Groq free-tier TPM rate-limit errors.
 - [x] Implement proactive conversational intent mapping in `SYSTEM_PROMPT` for seamless, keyword-free knowledge base querying.
+- [x] Configure dual-model HTTP 429 failover (`gpt-oss-20b` → `gpt-oss-120b`), `reasoning_effort="low"` (`max_tokens=2048`), empty-turn retry protection, cross-category default RAG filtering, and single-pass `tool_choice="none"` synthesis.
 - [ ] Build an RL-based Smart Charging Digital Twin for electric logistics fleets incorporating KERS downhill physics, Virtual Wheeling PPA arbitrage, and Eskom Megaflex tariffs (Master's Research Proposal core objective).
 - [ ] Implement automated push notifications (Email/SMS webhook) for active fleet temperature excursions.
 - [ ] Transition from synthetic data to integration with live IoT sensor hardware.
