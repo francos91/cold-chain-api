@@ -1062,11 +1062,11 @@ class AgentQueryResponse(BaseModel):
 
 
 def _is_carbon_calculation_query(query: str) -> bool:
-  """Detects explicit trip fuel/CO2e calculation requests (excluding tax/legislation/rail queries)."""
+  """Detects explicit trip fuel/CO2e calculation requests (excluding RAG/legislation/rail queries)."""
   q = query.lower()
   if any(
-      leg in q
-      for leg in [
+      excl in q
+      for excl in [
           "act",
           "tax",
           "legislation",
@@ -1076,6 +1076,13 @@ def _is_carbon_calculation_query(query: str) -> bool:
           "sop",
           "modal shift",
           "rail",
+          "knowledge base",
+          "search",
+          "according to",
+          "study",
+          "paper",
+          "document",
+          "du plessis",
       ]
   ):
     return False
@@ -1091,21 +1098,10 @@ def _is_carbon_calculation_query(query: str) -> bool:
           "emissions",
       ]
   )
-  has_trip_context = any(
-      t in q
-      for t in [
-          "km",
-          "tonne",
-          "tonnes",
-          "reefer",
-          "chilled",
-          "frozen",
-          "calculate",
-          "compute",
-          "trip",
-      ]
+  has_quantitative_trip = any(
+      t in q for t in ["km", "tonne", "tonnes", "t·km", "t-km"]
   )
-  return has_metric and has_trip_context
+  return has_metric and has_quantitative_trip
 
 
 @router.post("/query", response_model=AgentQueryResponse)
