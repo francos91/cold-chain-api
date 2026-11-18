@@ -935,7 +935,8 @@ GROQ_TOOLS = [
                         "type": "number",
                         "description": (
                             "Empty running percentage (0 to 99, e.g. 20 for"
-                            " 20%)."
+                            " 20%). Strictly pass 0 unless the user explicitly"
+                            " specifies empty running or repositioning."
                         ),
                     },
                     "dwell_and_precool_hours": {
