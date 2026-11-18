@@ -1,13 +1,13 @@
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import math
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from groq import AsyncGroq
+from groq import AsyncGroq, RateLimitError
 import joblib
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -23,8 +23,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://placeholder.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "placeholder-key")
 
-# Official fast production model on Groq (1,000 tps, high token allowance, active support)
-ACTIVE_MODEL = "openai/gpt-oss-20b"
+# Official fast production models on Groq with automatic 429 rate-limit failover
+PRIMARY_MODEL = "openai/gpt-oss-20b"
+FALLBACK_MODELS = ["openai/gpt-oss-120b"]
+ACTIVE_MODEL = PRIMARY_MODEL
 
 if not GROQ_API_KEY:
   logger.warning("GROQ_API_KEY is not set in environment.")
@@ -41,6 +43,28 @@ except Exception as e:
 
 groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
+
+async def _create_completion_with_fallback(**kwargs):
+  """Tries PRIMARY_MODEL first and fails over to FALLBACK_MODELS on Groq 429 rate limits."""
+  models_to_try = [PRIMARY_MODEL] + FALLBACK_MODELS
+  last_err = None
+
+  for model_id in models_to_try:
+    try:
+      return await groq_client.chat.completions.create(
+          model=model_id, **kwargs
+      )
+    except RateLimitError as e:
+      logger.warning(
+          "Groq 429 rate limit hit on '%s'. Failing over to next model...",
+          model_id,
+      )
+      last_err = e
+      continue
+
+  raise last_err
+
+
 # Load containerized ML assets
 try:
   rf_model = joblib.load("advanced_model.pkl")
@@ -52,7 +76,9 @@ except Exception as e:
 
 # Weather caching & regional telemetry safeguards
 _WEATHER_CACHE: Dict[str, Any] = {}
-_CACHE_TTL_SECONDS = 600  # 10-minute cache to protect shared Render IP from rate limits
+_CACHE_TTL_SECONDS = (
+    600  # 10-minute cache to protect shared Render IP from rate limits
+)
 _EMBED_CACHE: Dict[str, List[float]] = {}
 
 REGIONAL_FALLBACK_WEATHER = {
@@ -936,9 +962,8 @@ async def query_agent(payload: AgentQueryRequest):
     while iteration < max_tool_iterations:
       iteration += 1
 
-      # 3. FULL AUTONOMY: tool_choice omitted so Groq decides natively without mismatches.
-      completion = await groq_client.chat.completions.create(
-          model=ACTIVE_MODEL,
+      # 3. FULL AUTONOMY: tool_choice omitted so Groq decides natively, with 429 failover.
+      completion = await _create_completion_with_fallback(
           messages=messages,
           tools=GROQ_TOOLS,
           temperature=0.1,
@@ -1009,9 +1034,9 @@ async def query_agent(payload: AgentQueryRequest):
             "content": str(tool_output),
         })
 
-    # Final synthesis call after tools have run (tool_choice also omitted here for safety)
-    final_res = await groq_client.chat.completions.create(
-        model=ACTIVE_MODEL, messages=messages, temperature=0.1, max_tokens=1000
+    # Final synthesis call after tools have run (with 429 failover)
+    final_res = await _create_completion_with_fallback(
+        messages=messages, temperature=0.1, max_tokens=1000
     )
     return AgentQueryResponse(
         response=(
