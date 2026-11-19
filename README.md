@@ -1,4 +1,4 @@
-# Cold Chain Logistics Transport Intelligence Dashboard
+# Cold Chain Logistics Transport Intelligence Platform
 [![Cold Chain Logistics CI/CD](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml/badge.svg)](https://github.com/francos91/cold-chain-api/actions/workflows/ci.yml)
 
 An enterprise-grade, end-to-end data pipeline and decision-support architecture for monitoring cold chain integrity, from real-time IoT telemetry ingestion to predictive risk analysis, corridor weather integration, and an autonomous AI Control Tower Copilot powered by ultra-low-latency Groq LPUs with Human-in-the-Loop (HITL) safety guardrails.
