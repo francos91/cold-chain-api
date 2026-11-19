@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY Backend/main.py .
 COPY Backend/agent.py .
 COPY Backend/carbon_calculator.py .
+COPY Backend/fuel_pricing.py .
 
 # Copy ML models from the dashboard folder where they actually live
 COPY dashboard/advanced_model.pkl .
